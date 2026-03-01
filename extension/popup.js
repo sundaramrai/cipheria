@@ -597,5 +597,5 @@ document.getElementById('detail-content').addEventListener('click', (e) => {
   if (btn.dataset.action === 'copy') copyField(btn.dataset.value, btn.dataset.label);
 });
 
-// Start (cannot use top-level await in non-module scripts)
-init().catch(console.error);
+// Start
+await init();
