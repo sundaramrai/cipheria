@@ -88,7 +88,7 @@ function AuthPageContent() {
           }}>
             <Key size={22} color="#0a0908" strokeWidth={2.5} />
           </div>
-          <span className="font-display text-3xl" style={{ color: 'var(--text-primary)' }}>KeyVault</span>
+          <span className="font-display text-3xl" style={{ color: 'var(--text-primary)' }}>Cipheria</span>
         </div>
 
         {/* Card */}

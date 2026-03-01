@@ -18,7 +18,7 @@ except Exception as e:
     print(f"Warning: Could not create tables: {e}")
 
 app = FastAPI(
-    title="KeyVault API",
+    title="Cipheria API",
     description="Secure serverless password manager backend",
     version="1.0.0",
     docs_url="/api/docs",
@@ -46,7 +46,7 @@ app.include_router(vault_router, prefix="/api")
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "keyvault-api"}
+    return {"status": "ok", "service": "cipheria-api"}
 
 
 # Mangum handler — wraps ASGI app for AWS Lambda / Vercel serverless

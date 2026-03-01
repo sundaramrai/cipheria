@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "KeyVault",
+  "name": "Cipheria",
   "version": "1.0.0",
   "description": "Zero-knowledge password manager — secure, fast, always with you.",
   "icons": {
@@ -15,7 +15,7 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "KeyVault"
+    "default_title": "Cipheria"
   },
   "permissions": [
     "activeTab",

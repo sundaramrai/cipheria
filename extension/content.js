@@ -1,5 +1,5 @@
 /**
- * content.js — KeyVault content script.
+ * content.js — Cipheria content script.
  * Listens for AUTOFILL messages from the extension popup
  * and fills username/password fields on the active page.
  */
@@ -54,7 +54,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   // Visual feedback
   if (usernameField || passwordField) {
     const toast = document.createElement('div');
-    toast.innerHTML = '🔑 KeyVault — Credentials filled!';
+    toast.innerHTML = 'Cipheria — Credentials filled!';
     Object.assign(toast.style, {
       position: 'fixed', top: '16px', right: '16px', zIndex: '2147483647',
       background: '#0a0908', color: '#f5f0e8', border: '1px solid rgba(245,158,11,0.3)',

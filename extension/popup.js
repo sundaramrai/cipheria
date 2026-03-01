@@ -1,9 +1,9 @@
 /**
- * popup.js — KeyVault browser extension popup logic.
+ * popup.js — Cipheria browser extension popup logic.
  * Uses the Web Crypto API for AES-256-GCM encryption (same as the web app).
  */
 
-const API_URL = 'http://localhost:8000'; // ← Local development API
+const API_URL = 'https://cipheria.vercel.app'; // ← Production API
 const UI_URL = 'http://localhost:3000'; // ← Local development web app
 const PBKDF2_ITERATIONS = 600_000;
 
@@ -128,7 +128,7 @@ async function loginUser() {
   try {
     let res;
     try {
-      // pre-check: verify the API is reachable and is KeyVault
+      // pre-check: verify the API is reachable and is Cipheria
       const health = await fetch(`${API_URL}/api/health`).catch(() => null);
       if (!health) throw new Error(`Cannot reach server at ${API_URL} — is the API running?`);
       if (!health.ok) throw new Error(`Wrong server on port ${API_URL.split(':').pop()} (got ${health.status})`);

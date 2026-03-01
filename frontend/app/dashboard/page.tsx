@@ -137,7 +137,7 @@ export default function Dashboard() {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'keyvault-export.json'; a.click();
+      a.href = url; a.download = 'cipheria-export.json'; a.click();
       toast.success('Vault exported');
     } catch { toast.error('Export failed'); }
   };
@@ -225,7 +225,7 @@ export default function Dashboard() {
           <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Key size={16} color="#0a0908" strokeWidth={2.5} />
           </div>
-          <span className="font-display text-xl" style={{ color: 'var(--text-primary)' }}>KeyVault</span>
+          <span className="font-display text-xl" style={{ color: 'var(--text-primary)' }}>Cipheria</span>
         </div>
 
         {/* Categories */}

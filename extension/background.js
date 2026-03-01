@@ -1,5 +1,5 @@
 /**
- * background.js — Service worker for KeyVault extension.
+ * background.js — Service worker for Cipheria extension.
  * Stores the derived crypto key in memory (cleared when browser closes).
  * This avoids the user having to re-enter master password for every popup open.
  */

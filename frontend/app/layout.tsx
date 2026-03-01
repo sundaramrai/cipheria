@@ -3,7 +3,7 @@ import '../styles/globals.css';
 import { Toaster } from 'react-hot-toast';
 
 export const metadata: Metadata = {
-  title: 'KeyVault — Secure Password Manager',
+  title: 'Cipheria — Secure Password Manager',
   description: 'Zero-knowledge encrypted password vault. Your secrets, forever yours.',
   icons: [
     { rel: 'icon', type: 'image/svg+xml', url: '/favicon.svg' },

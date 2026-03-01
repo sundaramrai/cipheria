@@ -1,4 +1,4 @@
-# KeyVault — Zero-Knowledge Password Manager
+# Cipheria — Zero-Knowledge Password Manager
 
 A self-hosted password manager with client-side AES-256-GCM encryption. The server never sees your passwords.
 
@@ -28,8 +28,8 @@ Browser / Extension
 ### 1. Clone & install
 
 ```bash
-git clone https://github.com/sundaramrai/keyvault
-cd keyvault
+git clone https://github.com/sundaramrai/Cipheria
+cd Cipheria
 cd frontend && npm install && cd ..
 ```
 
@@ -100,14 +100,14 @@ vercel env add NEXT_PUBLIC_API_URL   # set to your Vercel URL after first deploy
 Edit `extension/popup.js` line 1:
 
 ```js
-const API_URL = "https://your-app.vercel.app";
+const API_URL = "https://cipheria.vercel.app";
 ```
 
 ### Package
 
 ```bash
 cd extension
-zip -r keyvault-extension.zip . -x "*.DS_Store"
+zip -r cipheria-extension.zip . -x "*.DS_Store"
 ```
 
 ---
@@ -129,7 +129,7 @@ A complete database breach exposes no plaintext passwords.
 ## Project Structure
 
 ```
-keyvault/
+cipheria/
 ├── api/                    # FastAPI serverless backend
 │   ├── index.py            # Entry point (Mangum adapter)
 │   ├── database.py         # SQLAlchemy models + Neon connection
@@ -178,7 +178,7 @@ keyvault/
 - `POST /` · `GET /:id` · `PATCH /:id` · `DELETE /:id`
 - `GET /export/json`
 
-Interactive docs: `https://your-app.vercel.app/api/docs`
+Interactive docs: `https://cipheria.vercel.app/api/docs`
 
 ---
 

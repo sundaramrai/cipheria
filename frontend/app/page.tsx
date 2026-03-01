@@ -23,7 +23,7 @@ export default function LandingPage() {
           }}>
             <Key size={18} color="#0a0908" strokeWidth={2.5} />
           </div>
-          <span className="font-display text-2xl" style={{ color: 'var(--text-primary)' }}>KeyVault</span>
+          <span className="font-display text-2xl" style={{ color: 'var(--text-primary)' }}>Cipheria</span>
         </div>
         <div className="flex items-center gap-4">
           <Link href="/auth" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textDecoration: 'none' }}
@@ -65,7 +65,7 @@ export default function LandingPage() {
           maxWidth: 540, lineHeight: 1.7, marginBottom: 48,
           animationDelay: '160ms',
         }}>
-          KeyVault encrypts everything client-side before it ever leaves your device.
+          Cipheria encrypts everything client-side before it ever leaves your device.
           Not even we can read your passwords.
         </p>
 
@@ -113,7 +113,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer style={{ borderTop: '1px solid var(--border)', padding: '24px 32px', textAlign: 'center' }}>
         <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-          © 2026 KeyVault · Open source · No ads · No tracking
+          © 2026 Cipheria · Open source · No ads · No tracking
         </span>
       </footer>
     </main>
