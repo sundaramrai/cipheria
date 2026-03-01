@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { Shield, Lock, Zap, Globe, Key, ArrowRight } from 'lucide-react';
+import { Shield, Lock, Zap, Globe, Key, ArrowRight, RefreshCw, Download } from 'lucide-react';
 
 export default function LandingPage() {
   return (
@@ -91,6 +91,8 @@ export default function LandingPage() {
               { icon: Zap, title: 'Instant Autofill', desc: 'Browser extension detects login forms and fills credentials in one click.' },
               { icon: Globe, title: 'Access Anywhere', desc: 'Syncs across all your devices via our secure serverless API on Vercel.' },
               { icon: Shield, title: 'Zero Knowledge', desc: 'End-to-end encrypted client-side. The server only ever sees ciphertext.' },
+              { icon: RefreshCw, title: 'Password Generator', desc: 'Generate strong, random passwords with custom length and character rules in one click.' },
+              { icon: Download, title: 'Vault Export', desc: 'Download your entire encrypted vault as JSON anytime — your data is always yours.' },
             ].map(({ icon: Icon, title, desc }) => (
               <div key={title} className="glass glass-hover" style={{
                 borderRadius: 16, padding: 28, transition: 'all 0.25s',
