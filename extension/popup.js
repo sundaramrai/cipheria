@@ -4,7 +4,7 @@
  */
 
 const API_URL = 'https://cipheria.vercel.app'; // ← Production API
-const UI_URL = 'http://localhost:3000'; // ← Local development web app
+const UI_URL = 'https://cipheria.vercel.app'; // ← Production web app
 const PBKDF2_ITERATIONS = 600_000;
 
 let cryptoKey = null;
