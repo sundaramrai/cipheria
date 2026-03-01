@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, Column, String, DateTime, Text, Boolean, Integer
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime
 import uuid
@@ -11,16 +12,15 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-# Neon requires SSL and connection pooling tweaks for serverless
+# Neon requires SSL; normalize legacy postgres:// scheme
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# NullPool is required for serverless (Vercel/Lambda) — each invocation is a fresh
+# process so persistent connection pools exhaust Neon's connection limit and cause 500s.
 engine = create_engine(
     DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,
-    pool_recycle=300,
+    poolclass=NullPool,
     connect_args={"sslmode": "require"} if "neon.tech" in DATABASE_URL else {},
 )
 
