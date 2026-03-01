@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Key, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -7,7 +7,7 @@ import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 import { passwordStrength } from '@/lib/crypto';
 
-export default function AuthPage() {
+function AuthPageContent() {
   const router = useRouter();
   const params = useSearchParams();
   const [tab, setTab] = useState<'login' | 'register'>(
@@ -45,11 +45,8 @@ export default function AuthPage() {
         toast.success('Account created! Set your master password to unlock the vault.');
       } else {
         const { data } = await authApi.login(form.email, form.password);
-        // Fetch user details
-        const meRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${data.access_token}` },
-        });
-        const user = await meRes.json();
+        sessionStorage.setItem('access_token', data.access_token);
+        const { data: user } = await authApi.me();
         setAuth(user, data.access_token, data.refresh_token);
         toast.success('Welcome back!');
       }
@@ -227,5 +224,13 @@ export default function AuthPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense>
+      <AuthPageContent />
+    </Suspense>
   );
 }
