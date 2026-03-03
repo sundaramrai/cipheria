@@ -1,14 +1,14 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Key, Search, Plus, LogOut, Lock, Star, Globe, CreditCard, StickyNote, User,
-  Copy, Eye, EyeOff, Trash2, Download, Shield, X, RefreshCw
+  Copy, Eye, EyeOff, Trash2, Download, Shield, X, RefreshCw, Edit2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuthStore } from '@/lib/store';
+import { useAuthStore, VaultItem } from '@/lib/store';
 import { vaultApi, authApi } from '@/lib/api';
-import { deriveKey, encryptData, decryptData, generatePassword, passwordStrength } from '@/lib/crypto';
+import { deriveKey, encryptData, decryptData, generatePassword, passwordStrength, checkHIBP } from '@/lib/crypto';
 
 type Category = 'all' | 'login' | 'card' | 'note' | 'identity';
 
@@ -29,10 +29,23 @@ export default function Dashboard() {
   const [masterPassword, setMasterPassword] = useState('');
   const [unlocking, setUnlocking] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<any>(null);
-  const [newItem, setNewItem] = useState({ name: '', category: 'login', username: '', password: '', url: '', notes: '' });
+  const [selectedItem, setSelectedItem] = useState<VaultItem | null>(null);
+  const [newItem, setNewItem] = useState({
+    name: '', category: 'login',
+    username: '', password: '', url: '', notes: '',
+    cardNumber: '', cardHolder: '', expiry: '', cvv: '',
+    firstName: '', lastName: '', phone: '', address: '',
+  });
+  const emptyForm = { name: '', category: 'login', username: '', password: '', url: '', notes: '', cardNumber: '', cardHolder: '', expiry: '', cvv: '', firstName: '', lastName: '', phone: '', address: '' };
   const genOptions = { length: 20, uppercase: true, lowercase: true, numbers: true, symbols: true };
   const [sessionLoading, setSessionLoading] = useState(true);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const IDLE_MS = 5 * 60 * 1000;
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState<typeof newItem | null>(null);
+  const [savingItem, setSavingItem] = useState(false);
+  const [updatingItem, setUpdatingItem] = useState(false);
+  const [hibp, setHibp] = useState<{ checking: boolean; count: number | null }>({ checking: false, count: null });
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -50,18 +63,38 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-lock after 5 minutes of inactivity
+  useEffect(() => {
+    if (isVaultLocked) return;
+    const reset = () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(() => {
+        lockVault();
+        toast('Vault auto-locked after 5 min of inactivity', { icon: '\uD83D\uDD12' });
+      }, IDLE_MS);
+    };
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'] as const;
+    events.forEach((e) => globalThis.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      events.forEach((e) => globalThis.removeEventListener(e, reset));
+    };
+    // IDLE_MS is a constant; lockVault/isVaultLocked are stable references
+  }, [isVaultLocked]);
+
   const unlockVault = async (e: React.FormEvent) => {
     e.preventDefault();
     setUnlocking(true);
     try {
-      const salt = user?.vault_salt || localStorage.getItem('vault_salt') || '';
+      const salt = user?.vault_salt || '';
       const key = await deriveKey(masterPassword, salt);
       setVaultKey(key);
 
       // Load vault items
       const { data } = await vaultApi.list();
       const decrypted = await Promise.all(
-        data.items.map(async (item: any) => {
+        data.map(async (item: any) => {
           try {
             const dec = await decryptData(item.encrypted_data, key);
             return { ...item, decrypted: dec };
@@ -79,20 +112,59 @@ export default function Dashboard() {
     }
   };
 
+  // Extract a human-readable message from Axios/Pydantic errors.
+  // Pydantic 422: detail is an array of {msg, loc}
+  // FastAPI HTTPException: detail is a plain string
+  const parseApiError = (err: any, fallback: string): string => {
+    const detail = err?.response?.data?.detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail) && detail.length > 0)
+      return detail.map((d: any) => String(d.msg ?? d).replace(/^Value error,\s*/i, '')).join('; ');
+    return fallback;
+  };
+
+  // Build favicon URL from a website URL; returns undefined if the URL is invalid
+  // so that a bad URL field never blocks saving the item.
+  const tryGetFaviconUrl = (url: string): string | undefined => {
+    try {
+      const { hostname } = new URL(url.includes('://') ? url : `https://${url}`);
+      return `https://www.google.com/s2/favicons?domain=${hostname}&sz=64`;
+    } catch {
+      return undefined;
+    }
+  };
+
   const handleLogout = async () => {
-    const rt = localStorage.getItem('refresh_token') || '';
-    try { await authApi.logout(rt); } catch { }
+    try { await authApi.logout(); } catch { }
     logout();
     router.push('/auth');
+  };
+
+  const buildPayload = (form: typeof emptyForm) => {
+    switch (form.category) {
+      case 'card':
+        return { cardNumber: form.cardNumber, cardHolder: form.cardHolder, expiry: form.expiry, cvv: form.cvv, notes: form.notes };
+      case 'identity':
+        return { firstName: form.firstName, lastName: form.lastName, phone: form.phone, address: form.address, notes: form.notes };
+      case 'note':
+        return { notes: form.notes };
+      default:
+        return { username: form.username, password: form.password, url: form.url, notes: form.notes };
+    }
   };
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cryptoKey) return;
+    if (newItem.category === 'login' && newItem.url && !/^https?:\/\//i.exec(newItem.url)) {
+      toast.error('URL must start with http:// or https://');
+      return;
+    }
+    setSavingItem(true);
     try {
-      const payload = { username: newItem.username, password: newItem.password, url: newItem.url, notes: newItem.notes };
+      const payload = buildPayload(newItem);
       const encrypted_data = await encryptData(payload, cryptoKey);
-      const favicon_url = newItem.url ? `https://www.google.com/s2/favicons?domain=${new URL(newItem.url).hostname}&sz=64` : undefined;
+      const favicon_url = newItem.url ? tryGetFaviconUrl(newItem.url) : undefined;
 
       const { data } = await vaultApi.create({
         name: newItem.name,
@@ -102,9 +174,49 @@ export default function Dashboard() {
       });
       addVaultItem({ ...data, decrypted: payload });
       setShowAddModal(false);
-      setNewItem({ name: '', category: 'login', username: '', password: '', url: '', notes: '' });
+      setNewItem(emptyForm);
       toast.success('Item added to vault');
-    } catch { toast.error('Failed to save item'); }
+    } catch (err) { toast.error(parseApiError(err, 'Failed to save item')); }
+    finally { setSavingItem(false); }
+  };
+
+  const handleOpenEdit = useCallback((item: VaultItem) => {
+    const d = item.decrypted ?? {};
+    setEditForm({
+      name: item.name, category: item.category,
+      username: d.username ?? '', password: d.password ?? '', url: d.url ?? '', notes: d.notes ?? '',
+      cardNumber: d.cardNumber ?? '', cardHolder: d.cardHolder ?? '', expiry: d.expiry ?? '', cvv: d.cvv ?? '',
+      firstName: d.firstName ?? '', lastName: d.lastName ?? '', phone: d.phone ?? '', address: d.address ?? '',
+    });
+    setHibp({ checking: false, count: null });
+    setShowEditModal(true);
+  }, []);
+
+  const handleEditItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cryptoKey || !editForm || !selectedItem) return;
+    if (editForm.category === 'login' && editForm.url && !/^https?:\/\//i.exec(editForm.url)) {
+      toast.error('URL must start with http:// or https://');
+      return;
+    }
+    setUpdatingItem(true);
+    try {
+      const payload = buildPayload(editForm);
+      const encrypted_data = await encryptData(payload, cryptoKey);
+      const favicon_url = editForm.url
+        ? tryGetFaviconUrl(editForm.url) ?? selectedItem.favicon_url
+        : selectedItem.favicon_url;
+      const { data } = await vaultApi.update(selectedItem.id, {
+        name: editForm.name, category: editForm.category, encrypted_data, favicon_url,
+      });
+      const updated = { ...data, decrypted: payload };
+      updateVaultItem(selectedItem.id, updated);
+      setSelectedItem(updated);
+      setShowEditModal(false);
+      setEditForm(null);
+      toast.success('Item updated');
+    } catch (err) { toast.error(parseApiError(err, 'Failed to update item')); }
+    finally { setUpdatingItem(false); }
   };
 
   const handleDelete = async (id: string) => {
@@ -113,14 +225,15 @@ export default function Dashboard() {
       removeVaultItem(id);
       if (selectedItem?.id === id) setSelectedItem(null);
       toast.success('Item deleted');
-    } catch { toast.error('Failed to delete'); }
+    } catch (err) { toast.error(parseApiError(err, 'Failed to delete')); }
   };
 
-  const handleToggleFav = async (item: any) => {
+  const handleToggleFav = async (item: VaultItem) => {
     try {
       await vaultApi.update(item.id, { is_favourite: !item.is_favourite });
-      updateVaultItem(item.id, { ...item, is_favourite: !item.is_favourite });
-      if (selectedItem?.id === item.id) setSelectedItem({ ...selectedItem, is_favourite: !item.is_favourite });
+      const updated = { ...item, is_favourite: !item.is_favourite };
+      updateVaultItem(item.id, updated);
+      if (selectedItem?.id === item.id) setSelectedItem(updated);
     } catch { }
   };
 
@@ -360,6 +473,9 @@ export default function Dashboard() {
                 <button onClick={() => handleToggleFav(selectedItem)} className="btn-ghost" style={{ padding: '8px 12px' }}>
                   <Star size={16} color={selectedItem.is_favourite ? 'var(--accent)' : 'var(--text-secondary)'} fill={selectedItem.is_favourite ? 'var(--accent)' : 'none'} />
                 </button>
+                <button onClick={() => handleOpenEdit(selectedItem)} className="btn-ghost" style={{ padding: '8px 12px' }} title="Edit item">
+                  <Edit2 size={16} />
+                </button>
                 <button onClick={() => handleDelete(selectedItem.id)} className="btn-ghost"
                   style={{ padding: '8px 12px', color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.2)' }}>
                   <Trash2 size={16} />
@@ -370,13 +486,49 @@ export default function Dashboard() {
             {/* Fields */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {selectedItem.decrypted?.url && (
-                <Field label="URL" value={selectedItem.decrypted.url} onCopy={() => copyToClipboard(selectedItem.decrypted.url, 'URL')} />
+                <Field label="URL" value={selectedItem.decrypted.url} onCopy={() => copyToClipboard(selectedItem.decrypted!.url!, 'URL')} />
               )}
               {selectedItem.decrypted?.username && (
-                <Field label="Username / Email" value={selectedItem.decrypted.username} onCopy={() => copyToClipboard(selectedItem.decrypted.username, 'Username')} />
+                <Field label="Username / Email" value={selectedItem.decrypted.username} onCopy={() => copyToClipboard(selectedItem.decrypted!.username!, 'Username')} />
               )}
               {selectedItem.decrypted?.password && (
-                <Field label="Password" value={selectedItem.decrypted.password} secret onCopy={() => copyToClipboard(selectedItem.decrypted.password, 'Password')} />
+                <>
+                  <Field label="Password" value={selectedItem.decrypted.password} secret onCopy={() => copyToClipboard(selectedItem.decrypted!.password!, 'Password')} />
+                  <HibpCheck
+                    hibp={hibp}
+                    onCheck={async () => {
+                      setHibp({ checking: true, count: null });
+                      try {
+                        const c = await checkHIBP(selectedItem.decrypted!.password!);
+                        setHibp({ checking: false, count: c });
+                      } catch { setHibp({ checking: false, count: -1 }); }
+                    }}
+                  />
+                </>
+              )}
+              {selectedItem.decrypted?.cardNumber && (
+                <Field label="Card Number" value={selectedItem.decrypted.cardNumber} secret onCopy={() => copyToClipboard(selectedItem.decrypted!.cardNumber!, 'Card number')} />
+              )}
+              {selectedItem.decrypted?.cardHolder && (
+                <Field label="Cardholder Name" value={selectedItem.decrypted.cardHolder} onCopy={() => copyToClipboard(selectedItem.decrypted!.cardHolder!, 'Cardholder')} />
+              )}
+              {selectedItem.decrypted?.expiry && (
+                <Field label="Expiry" value={selectedItem.decrypted.expiry} onCopy={() => copyToClipboard(selectedItem.decrypted!.expiry!, 'Expiry')} />
+              )}
+              {selectedItem.decrypted?.cvv && (
+                <Field label="CVV" value={selectedItem.decrypted.cvv} secret onCopy={() => copyToClipboard(selectedItem.decrypted!.cvv!, 'CVV')} />
+              )}
+              {selectedItem.decrypted?.firstName && (
+                <Field label="First Name" value={selectedItem.decrypted.firstName} onCopy={() => copyToClipboard(selectedItem.decrypted!.firstName!, 'First name')} />
+              )}
+              {selectedItem.decrypted?.lastName && (
+                <Field label="Last Name" value={selectedItem.decrypted.lastName} onCopy={() => copyToClipboard(selectedItem.decrypted!.lastName!, 'Last name')} />
+              )}
+              {selectedItem.decrypted?.phone && (
+                <Field label="Phone" value={selectedItem.decrypted.phone} onCopy={() => copyToClipboard(selectedItem.decrypted!.phone!, 'Phone')} />
+              )}
+              {selectedItem.decrypted?.address && (
+                <Field label="Address" value={selectedItem.decrypted.address} multiline />
               )}
               {selectedItem.decrypted?.notes && (
                 <Field label="Notes" value={selectedItem.decrypted.notes} multiline />
@@ -392,66 +544,12 @@ export default function Dashboard() {
 
       {/* Add Item Modal */}
       {showAddModal && (
-        <Modal onClose={() => setShowAddModal(false)} title="Add Item">
-          <form onSubmit={handleAddItem} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label htmlFor="item-name" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>NAME *</label>
-                <input id="item-name" className="input-field" required placeholder="GitHub" value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })} />
-              </div>
-              <div>
-                <label htmlFor="item-category" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>CATEGORY</label>
-                <select id="item-category" className="input-field" value={newItem.category} onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}
-                  style={{ cursor: 'pointer' }}>
-                  <option value="login">Login</option>
-                  <option value="card">Card</option>
-                  <option value="note">Note</option>
-                  <option value="identity">Identity</option>
-                </select>
-              </div>
-            </div>
-            {newItem.category === 'login' && (
-              <>
-                <div>
-                  <label htmlFor="item-url" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>URL</label>
-                  <input id="item-url" className="input-field" placeholder="https://github.com" value={newItem.url} onChange={(e) => setNewItem({ ...newItem, url: e.target.value })} />
-                </div>
-                <div>
-                  <label htmlFor="item-username" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>USERNAME / EMAIL</label>
-                  <input id="item-username" className="input-field" placeholder="you@example.com" value={newItem.username} onChange={(e) => setNewItem({ ...newItem, username: e.target.value })} />
-                </div>
-                <div>
-                  <label htmlFor="item-password" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>PASSWORD</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input id="item-password" className="input-field" type="password" placeholder="••••••••" value={newItem.password}
-                      onChange={(e) => setNewItem({ ...newItem, password: e.target.value })} style={{ flex: 1 }} />
-                    <button type="button" className="btn-ghost" style={{ padding: '10px 14px', flexShrink: 0 }}
-                      onClick={() => setNewItem({ ...newItem, password: generatePassword(genOptions) })} title="Generate password">
-                      <RefreshCw size={14} />
-                    </button>
-                  </div>
-                  {newItem.password && (() => {
-                    const s = passwordStrength(newItem.password);
-                    return <div style={{ marginTop: 6 }}>
-                      <div style={{ display: 'flex', gap: 3 }}>
-                        {[0, 1, 2, 3, 4].map(i => <div key={i} style={{ height: 3, flex: 1, borderRadius: 2, background: i <= s.score ? s.color : 'rgba(255,255,255,0.1)' }} />)}
-                      </div>
-                    </div>;
-                  })()}
-                </div>
-              </>
-            )}
-            <div>
-              <label htmlFor="item-notes" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>NOTES</label>
-              <textarea id="item-notes" className="input-field" rows={3} placeholder="Additional notes..." value={newItem.notes}
-                onChange={(e) => setNewItem({ ...newItem, notes: e.target.value })} style={{ resize: 'vertical' }} />
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-              <button type="button" className="btn-ghost" onClick={() => setShowAddModal(false)} style={{ flex: 1 }}>Cancel</button>
-              <button type="submit" className="btn-primary" style={{ flex: 2 }}>Save to Vault</button>
-            </div>
-          </form>
-        </Modal>
+        <AddItemModal newItem={newItem} setNewItem={setNewItem} savingItem={savingItem} genOptions={genOptions} onSubmit={handleAddItem} onClose={() => setShowAddModal(false)} />
+      )}
+
+      {/* Edit Item Modal */}
+      {showEditModal && editForm && (
+        <EditItemModal editForm={editForm} setEditForm={setEditForm} updatingItem={updatingItem} genOptions={genOptions} onSubmit={handleEditItem} onClose={() => { setShowEditModal(false); setEditForm(null); }} />
       )}
     </div>
   );
@@ -459,6 +557,41 @@ export default function Dashboard() {
 
 // Sub-components
 
+function HibpCheck({ hibp, onCheck }: Readonly<{
+  hibp: { checking: boolean; count: number | null };
+  onCheck: () => void;
+}>) {
+  const { checking, count } = hibp;
+  let statusColor = 'var(--text-secondary)';
+  if (count === 0) statusColor = '#22c55e';
+  else if (count !== null && count > 0) statusColor = '#ef4444';
+  let statusText = '';
+  if (count === -1) statusText = 'Check failed';
+  else if (count === 0) statusText = '\u2713 Not found in known breaches';
+  else if (count !== null) statusText = `\u26A0 Found in ${count.toLocaleString()} breaches`;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: -8 }}>
+      <button
+        type="button"
+        onClick={onCheck}
+        disabled={checking}
+        style={{
+          fontSize: '0.72rem', padding: '4px 10px', borderRadius: 6,
+          border: '1px solid var(--border)', background: 'transparent',
+          color: 'var(--text-secondary)', cursor: checking ? 'default' : 'pointer',
+          opacity: checking ? 0.6 : 1,
+        }}
+      >
+        {checking ? 'Checking\u2026' : 'Check breaches (HIBP)'}
+      </button>
+      {count !== null && (
+        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: statusColor }}>
+          {statusText}
+        </span>
+      )}
+    </div>
+  );
+}
 
 function Field({ label, value, secret, onCopy }: Readonly<{
   label: string; value: string; secret?: boolean; multiline?: boolean; onCopy?: () => void;
@@ -532,5 +665,163 @@ function Modal({ children, onClose, title }: Readonly<{ children: React.ReactNod
         {children}
       </div>
     </dialog>
+  );
+}
+
+function AddItemModal({ newItem, setNewItem, savingItem, genOptions, onSubmit, onClose }: Readonly<{
+  newItem: any; setNewItem: (f: any) => void; savingItem: boolean; genOptions: any; onSubmit: (e: React.FormEvent) => void; onClose: () => void;
+}>) {
+  return (
+    <Modal onClose={onClose} title="Add Item">
+      <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label htmlFor="item-name" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>NAME *</label>
+            <input id="item-name" className="input-field" required placeholder="GitHub" value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })} />
+          </div>
+          <div>
+            <label htmlFor="item-category" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>CATEGORY</label>
+            <select id="item-category" className="input-field" value={newItem.category} onChange={(e) => setNewItem({ ...newItem, category: e.target.value })} style={{ cursor: 'pointer' }}>
+              <option value="login">Login</option>
+              <option value="card">Card</option>
+              <option value="note">Note</option>
+              <option value="identity">Identity</option>
+            </select>
+          </div>
+        </div>
+        {newItem.category === 'login' && <LoginFormFields form={newItem} setForm={setNewItem} genOptions={genOptions} />}
+        {newItem.category === 'card' && <CardFormFields form={newItem} setForm={setNewItem} prefix="add" />}
+        {newItem.category === 'identity' && <IdentityFormFields form={newItem} setForm={setNewItem} prefix="add" />}
+        <div>
+          <label htmlFor="item-notes" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>NOTES</label>
+          <textarea id="item-notes" className="input-field" rows={3} placeholder="Additional notes..." value={newItem.notes}
+            onChange={(e) => setNewItem({ ...newItem, notes: e.target.value })} style={{ resize: 'vertical' }} />
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+          <button type="button" className="btn-ghost" onClick={onClose} style={{ flex: 1 }}>Cancel</button>
+          <button type="submit" className="btn-primary" style={{ flex: 2, opacity: savingItem ? 0.5 : 1 }} disabled={savingItem}>
+            {savingItem ? 'Saving...' : 'Save to Vault'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function EditItemModal({ editForm, setEditForm, updatingItem, genOptions, onSubmit, onClose }: Readonly<{
+  editForm: any; setEditForm: (f: any) => void; updatingItem: boolean; genOptions: any; onSubmit: (e: React.FormEvent) => void; onClose: () => void;
+}>) {
+  return (
+    <Modal onClose={onClose} title="Edit Item">
+      <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label htmlFor="edit-name" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>NAME *</label>
+            <input id="edit-name" className="input-field" required placeholder="GitHub" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+          </div>
+          <div>
+            <label htmlFor="edit-category" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>CATEGORY</label>
+            <select id="edit-category" className="input-field" value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })} style={{ cursor: 'pointer' }}>
+              <option value="login">Login</option>
+              <option value="card">Card</option>
+              <option value="note">Note</option>
+              <option value="identity">Identity</option>
+            </select>
+          </div>
+        </div>
+        {editForm.category === 'login' && <LoginFormFields form={editForm} setForm={setEditForm} genOptions={genOptions} />}
+        {editForm.category === 'card' && <CardFormFields form={editForm} setForm={setEditForm} prefix="edit" />}
+        {editForm.category === 'identity' && <IdentityFormFields form={editForm} setForm={setEditForm} prefix="edit" />}
+        <div>
+          <label htmlFor="edit-notes" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>NOTES</label>
+          <textarea id="edit-notes" className="input-field" rows={3} placeholder="Additional notes..." value={editForm.notes}
+            onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} style={{ resize: 'vertical' }} />
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+          <button type="button" className="btn-ghost" onClick={onClose} style={{ flex: 1 }}>Cancel</button>
+          <button type="submit" className="btn-primary" style={{ flex: 2, opacity: updatingItem ? 0.5 : 1 }} disabled={updatingItem}>
+            {updatingItem ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function LoginFormFields({ form, setForm, genOptions }: Readonly<{ form: any; setForm: (f: any) => void; genOptions: any }>) {
+  return (
+    <>
+      <div>
+        <label htmlFor="login-url" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>URL</label>
+        <input id="login-url" className="input-field" placeholder="https://github.com" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+      </div>
+      <div>
+        <label htmlFor="login-username" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>USERNAME / EMAIL</label>
+        <input id="login-username" className="input-field" placeholder="you@example.com" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
+      </div>
+      <div>
+        <label htmlFor="login-password" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>PASSWORD</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input id="login-password" className="input-field" type="password" placeholder="••••••••" value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })} style={{ flex: 1 }} />
+          <button type="button" className="btn-ghost" style={{ padding: '10px 14px', flexShrink: 0 }}
+            onClick={() => setForm({ ...form, password: generatePassword(genOptions) })} title="Generate password">
+            <RefreshCw size={14} />
+          </button>
+        </div>
+        {form.password && (() => {
+          const s = passwordStrength(form.password);
+          return <div style={{ marginTop: 6 }}><div style={{ display: 'flex', gap: 3 }}>
+            {[0, 1, 2, 3, 4].map(i => <div key={i} style={{ height: 3, flex: 1, borderRadius: 2, background: i <= s.score ? s.color : 'rgba(255,255,255,0.1)' }} />)}
+          </div></div>;
+        })()}
+      </div>
+    </>
+  );
+}
+
+function CardFormFields({ form, setForm, prefix }: Readonly<{ form: any; setForm: (f: any) => void; prefix: string }>) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <div style={{ gridColumn: '1 / -1' }}>
+        <label htmlFor={`${prefix}-card-number`} style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>CARD NUMBER</label>
+        <input id={`${prefix}-card-number`} className="input-field" placeholder="4111 1111 1111 1111" value={form.cardNumber} onChange={(e) => setForm({ ...form, cardNumber: e.target.value })} />
+      </div>
+      <div style={{ gridColumn: '1 / -1' }}>
+        <label htmlFor={`${prefix}-card-holder`} style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>CARDHOLDER NAME</label>
+        <input id={`${prefix}-card-holder`} className="input-field" placeholder="Jane Smith" value={form.cardHolder} onChange={(e) => setForm({ ...form, cardHolder: e.target.value })} />
+      </div>
+      <div>
+        <label htmlFor={`${prefix}-expiry`} style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>EXPIRY</label>
+        <input id={`${prefix}-expiry`} className="input-field" placeholder="MM/YY" value={form.expiry} onChange={(e) => setForm({ ...form, expiry: e.target.value })} />
+      </div>
+      <div>
+        <label htmlFor={`${prefix}-cvv`} style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>CVV</label>
+        <input id={`${prefix}-cvv`} className="input-field" placeholder="•••" type="password" value={form.cvv} onChange={(e) => setForm({ ...form, cvv: e.target.value })} />
+      </div>
+    </div>
+  );
+}
+
+function IdentityFormFields({ form, setForm, prefix }: Readonly<{ form: any; setForm: (f: any) => void; prefix: string }>) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <div>
+        <label htmlFor={`${prefix}-first-name`} style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>FIRST NAME</label>
+        <input id={`${prefix}-first-name`} className="input-field" placeholder="Jane" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
+      </div>
+      <div>
+        <label htmlFor={`${prefix}-last-name`} style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>LAST NAME</label>
+        <input id={`${prefix}-last-name`} className="input-field" placeholder="Smith" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
+      </div>
+      <div>
+        <label htmlFor={`${prefix}-phone`} style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>PHONE</label>
+        <input id={`${prefix}-phone`} className="input-field" placeholder="+1 555 000 0000" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+      </div>
+      <div style={{ gridColumn: '1 / -1' }}>
+        <label htmlFor={`${prefix}-address`} style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 6 }}>ADDRESS</label>
+        <input id={`${prefix}-address`} className="input-field" placeholder="123 Main St, City" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+      </div>
+    </div>
   );
 }
