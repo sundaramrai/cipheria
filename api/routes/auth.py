@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Cookie
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from jose import JWTError
-from typing import Annotated
+from typing import Annotated, Optional
 
 from database import get_db, User, AuditLog, RefreshToken
 from crypto import (
@@ -10,10 +10,27 @@ from crypto import (
     create_access_token, create_refresh_token, decode_token,
     hash_refresh_token, generate_salt, REFRESH_TOKEN_EXPIRE_DAYS
 )
-from schemas import RegisterRequest, LoginRequest, TokenResponse, RefreshRequest, UserResponse
+from schemas import RegisterRequest, LoginRequest, TokenResponse, UserResponse
 from deps import get_current_user_from_db
 
+import os
+
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+IS_PROD = os.getenv("ENVIRONMENT", "development") == "production"
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    """Store refresh token in an HttpOnly cookie — never exposed to JavaScript."""
+    response.set_cookie(
+        key="refresh_token",
+        value=token,
+        httponly=True,
+        secure=IS_PROD,   # True in production (HTTPS), False in dev (HTTP)
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/api/auth",
+    )
 
 
 def log_action(db: Session, user_id, action: str, request: Request):
@@ -27,7 +44,12 @@ def log_action(db: Session, user_id, action: str, request: Request):
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201, responses={400: {"description": "Email already registered"}})
-def register(body: RegisterRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
+def register(
+    body: RegisterRequest,
+    request: Request,
+    response: Response,
+    db: Annotated[Session, Depends(get_db)],
+):
     if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -39,7 +61,7 @@ def register(body: RegisterRequest, request: Request, db: Annotated[Session, Dep
         vault_salt=generate_salt(32),
     )
     db.add(user)
-    db.commit()
+    db.flush()  # get user.id before commit
 
     access_token = create_access_token({"sub": str(user.id)})
     refresh_token = create_refresh_token({"sub": str(user.id)})
@@ -50,20 +72,27 @@ def register(body: RegisterRequest, request: Request, db: Annotated[Session, Dep
         expires_at=datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
     )
     db.add(rt)
+
     log_action(db, user.id, "REGISTER", request)
+
     db.commit()
+    _set_refresh_cookie(response, refresh_token)
 
     return TokenResponse(
         access_token=access_token,
-        refresh_token=refresh_token,
         vault_salt=user.vault_salt,
     )
 
 
 @router.post("/login", response_model=TokenResponse, responses={401: {"description": "Invalid email or password"}})
-def login(body: LoginRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
+def login(
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Annotated[Session, Depends(get_db)],
+):
     user = db.query(User).filter(User.email == body.email).first()
-    # Check is_active and password in one condition to avoid leaking account state
+
     if not user or not user.is_active or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -76,27 +105,37 @@ def login(body: LoginRequest, request: Request, db: Annotated[Session, Depends(g
         expires_at=datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
     )
     db.add(rt)
+
     log_action(db, user.id, "LOGIN", request)
+
     db.commit()
+    _set_refresh_cookie(response, refresh_token)
 
     return TokenResponse(
         access_token=access_token,
-        refresh_token=refresh_token,
         vault_salt=user.vault_salt,
     )
 
 
-@router.post("/refresh", response_model=TokenResponse, responses={401: {"description": "Invalid or expired refresh token"}})
-def refresh(body: RefreshRequest, db: Annotated[Session, Depends(get_db)]):
+@router.post("/refresh", response_model=TokenResponse, responses={401: {"description": "Invalid token type, Invalid refresh token, Refresh token expired or revoked, or Account not found or disabled"}})
+def refresh(
+    response: Response,
+    db: Annotated[Session, Depends(get_db)],
+    refresh_token: Annotated[Optional[str], Cookie()] = None,
+):
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="No refresh token")
+
     try:
-        payload = decode_token(body.refresh_token)
+        payload = decode_token(refresh_token)
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="Invalid token type")
         user_id = payload.get("sub")
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    token_hash = hash_refresh_token(body.refresh_token)
+    token_hash = hash_refresh_token(refresh_token)
+
     stored = db.query(RefreshToken).filter(
         RefreshToken.token_hash == token_hash,
         RefreshToken.revoked == False,
@@ -107,7 +146,9 @@ def refresh(body: RefreshRequest, db: Annotated[Session, Depends(get_db)]):
         raise HTTPException(status_code=401, detail="Refresh token expired or revoked")
 
     stored.revoked = True
+
     user = db.query(User).filter(User.id == user_id).first()
+
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Account not found or disabled")
 
@@ -120,22 +161,29 @@ def refresh(body: RefreshRequest, db: Annotated[Session, Depends(get_db)]):
         expires_at=datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
     )
     db.add(new_rt)
+
     db.commit()
+    _set_refresh_cookie(response, new_refresh)
 
     return TokenResponse(
         access_token=new_access,
-        refresh_token=new_refresh,
         vault_salt=user.vault_salt,
     )
 
 
 @router.post("/logout")
-def logout(body: RefreshRequest, db: Annotated[Session, Depends(get_db)]):
-    token_hash = hash_refresh_token(body.refresh_token)
-    stored = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
-    if stored:
-        stored.revoked = True
-        db.commit()
+def logout(
+    response: Response,
+    db: Annotated[Session, Depends(get_db)],
+    refresh_token: Annotated[Optional[str], Cookie()] = None,
+):
+    if refresh_token:
+        token_hash = hash_refresh_token(refresh_token)
+        stored = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
+        if stored:
+            stored.revoked = True
+            db.commit()
+    response.delete_cookie(key="refresh_token", path="/api/auth", httponly=True, secure=IS_PROD, samesite="lax")
     return {"message": "Logged out"}
 
 
