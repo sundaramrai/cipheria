@@ -3,8 +3,7 @@
  * Uses the Web Crypto API for AES-256-GCM encryption (same as the web app).
  */
 
-const API_URL = 'https://cipheria.vercel.app'; // ← Production API
-const UI_URL = 'https://cipheria.vercel.app'; // ← Production web app
+const URL = 'https://cipheria.vercel.app'; // ← Production API and web app URL (also used for opening the web app from the extension)
 const PBKDF2_ITERATIONS = 600_000;
 
 let cryptoKey = null;
@@ -30,7 +29,7 @@ async function init() {
   // Access token is cleared every popup close (sessionStorage) — silently refresh it
   if (!accessToken && refreshToken) {
     try {
-      const res = await fetch(`${API_URL}/api/auth/refresh`, {
+      const res = await fetch(`${URL}/api/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh_token: refreshToken }),
@@ -129,17 +128,17 @@ async function loginUser() {
     let res;
     try {
       // pre-check: verify the API is reachable and is Cipheria
-      const health = await fetch(`${API_URL}/api/health`).catch(() => null);
-      if (!health) throw new Error(`Cannot reach server at ${API_URL} — is the API running?`);
-      if (!health.ok) throw new Error(`Wrong server on port ${API_URL.split(':').pop()} (got ${health.status})`);
+      const health = await fetch(`${URL}/api/health`).catch(() => null);
+      if (!health) throw new Error(`Cannot reach server at ${URL} — is the API running?`);
+      if (!health.ok) throw new Error(`Wrong server on port ${URL.split(':').pop()} (got ${health.status})`);
 
-      res = await fetch(`${API_URL}/api/auth/login`, {
+      res = await fetch(`${URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
     } catch {
-      throw new Error(`Cannot reach server at ${API_URL} — is the API running?`);
+      throw new Error(`Cannot reach server at ${URL} — is the API running?`);
     }
 
     if (!res.ok) {
@@ -194,13 +193,13 @@ async function registerUser() {
   try {
     let res;
     try {
-      res = await fetch(`${API_URL}/api/auth/register`, {
+      res = await fetch(`${URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, full_name, master_hint }),
       });
     } catch {
-      throw new Error(`Cannot reach server at ${API_URL} — is the API running?`);
+      throw new Error(`Cannot reach server at ${URL} — is the API running?`);
     }
 
     if (!res.ok) {
@@ -255,7 +254,7 @@ function lockVault() {
 async function loadVault() {
   try {
     const token = await getValidToken();
-    const res = await fetch(`${API_URL}/api/vault`, {
+    const res = await fetch(`${URL}/api/vault`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json();
@@ -374,7 +373,7 @@ async function deleteCurrentItem() {
   if (!currentItem || !confirm(`Delete "${currentItem.name}"?`)) return;
   try {
     const token = await getValidToken();
-    await fetch(`${API_URL}/api/vault/${currentItem.id}`, {
+    await fetch(`${URL}/api/vault/${currentItem.id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -402,7 +401,7 @@ async function saveItem() {
     const favicon_url = url ? `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=64` : null;
     const token = await getValidToken();
 
-    const res = await fetch(`${API_URL}/api/vault`, {
+    const res = await fetch(`${URL}/api/vault`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ name, category: 'login', encrypted_data, favicon_url }),
@@ -423,6 +422,7 @@ function fillGenerated() {
   const arr = new Uint32Array(20);
   crypto.getRandomValues(arr);
   document.getElementById('add-password').value = Array.from(arr, x => chars[x % chars.length]).join('');
+  // nosemgrep: javascript:S2068 - password is randomly generated, not hard-coded
   document.getElementById('add-password').type = 'text';
 }
 
@@ -485,7 +485,7 @@ async function getValidToken() {
   const refresh = localStorage.getItem('kv_refresh_token');
   if (!refresh) throw new Error('Not authenticated');
 
-  const res = await fetch(`${API_URL}/api/auth/refresh`, {
+  const res = await fetch(`${URL}/api/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh_token: refresh }),
@@ -522,7 +522,7 @@ function removeKeyFromBackground() {
 // Utils
 
 function openWebApp() {
-  chrome.tabs.create({ url: UI_URL });
+  chrome.tabs.create({ url: URL });
 }
 
 function getCategoryLabel(cat) {
