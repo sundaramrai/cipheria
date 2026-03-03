@@ -1,9 +1,8 @@
 from sqlalchemy import create_engine, Column, String, DateTime, Text, Boolean, Integer
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import NullPool
 from sqlalchemy.dialects.postgresql import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import os
 from dotenv import load_dotenv
@@ -26,10 +25,12 @@ engine = create_engine(
 
 # expire_on_commit=False: keeps objects usable after commit without an extra SELECT
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
-Base = declarative_base()
 
+# Base class for models
+class Base(DeclarativeBase):
+    pass
 
-# ── Models ──────────────────────────────────────────────────────────────────
+# Models
 
 class User(Base):
     __tablename__ = "users"
@@ -39,8 +40,8 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     # Master password hint (never the actual password)
     master_hint = Column(String(255), nullable=True)
     # Salt for client-side key derivation
@@ -58,8 +59,8 @@ class VaultItem(Base):
     encrypted_data = Column(Text, nullable=False)        # JSON blob: {username, password, url, notes, ...}
     favicon_url = Column(String(512), nullable=True)
     is_favourite = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class AuditLog(Base):
@@ -70,7 +71,7 @@ class AuditLog(Base):
     action = Column(String(64), nullable=False)          # LOGIN, CREATE_ITEM, DELETE_ITEM, etc.
     ip_address = Column(String(64), nullable=True)
     user_agent = Column(String(512), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class RefreshToken(Base):
@@ -80,7 +81,7 @@ class RefreshToken(Base):
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     token_hash = Column(String(255), nullable=False, unique=True)
     expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     revoked = Column(Boolean, default=False)
 
 
