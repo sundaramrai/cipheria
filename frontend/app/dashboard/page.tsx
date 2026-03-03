@@ -45,6 +45,7 @@ export default function Dashboard() {
   const [editForm, setEditForm] = useState<typeof newItem | null>(null);
   const [savingItem, setSavingItem] = useState(false);
   const [updatingItem, setUpdatingItem] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [hibp, setHibp] = useState<{ checking: boolean; count: number | null }>({ checking: false, count: null });
 
   useEffect(() => {
@@ -86,12 +87,14 @@ export default function Dashboard() {
   const unlockVault = async (e: React.FormEvent) => {
     e.preventDefault();
     setUnlocking(true);
+    const tid = toast.loading('Unlocking vault...');
     try {
       const salt = user?.vault_salt || '';
       const key = await deriveKey(masterPassword, salt);
       setVaultKey(key);
 
       // Load vault items
+      toast.loading('Loading items...', { id: tid });
       const { data } = await vaultApi.list();
       const decrypted = await Promise.all(
         data.map(async (item: any) => {
@@ -103,9 +106,9 @@ export default function Dashboard() {
       );
       setVaultItems(decrypted);
       setMasterPassword('');
-      toast.success('Vault unlocked');
+      toast.success('Vault unlocked', { id: tid });
     } catch (err) {
-      toast.error('Wrong master password or corrupted data');
+      toast.error('Wrong master password or corrupted data', { id: tid });
       console.error('Vault unlock error:', err);
     } finally {
       setUnlocking(false);
@@ -161,6 +164,7 @@ export default function Dashboard() {
       return;
     }
     setSavingItem(true);
+    const tid = toast.loading('Saving to vault...');
     try {
       const payload = buildPayload(newItem);
       const encrypted_data = await encryptData(payload, cryptoKey);
@@ -175,8 +179,8 @@ export default function Dashboard() {
       addVaultItem({ ...data, decrypted: payload });
       setShowAddModal(false);
       setNewItem(emptyForm);
-      toast.success('Item added to vault');
-    } catch (err) { toast.error(parseApiError(err, 'Failed to save item')); }
+      toast.success('Item added to vault', { id: tid });
+    } catch (err) { toast.error(parseApiError(err, 'Failed to save item'), { id: tid }); }
     finally { setSavingItem(false); }
   };
 
@@ -200,6 +204,7 @@ export default function Dashboard() {
       return;
     }
     setUpdatingItem(true);
+    const tid = toast.loading('Updating item...');
     try {
       const payload = buildPayload(editForm);
       const encrypted_data = await encryptData(payload, cryptoKey);
@@ -214,18 +219,22 @@ export default function Dashboard() {
       setSelectedItem(updated);
       setShowEditModal(false);
       setEditForm(null);
-      toast.success('Item updated');
-    } catch (err) { toast.error(parseApiError(err, 'Failed to update item')); }
+      toast.success('Item updated', { id: tid });
+    } catch (err) { toast.error(parseApiError(err, 'Failed to update item'), { id: tid }); }
     finally { setUpdatingItem(false); }
   };
 
   const handleDelete = async (id: string) => {
+    if (deletingId) return;
+    setDeletingId(id);
+    const tid = toast.loading('Deleting item...');
     try {
       await vaultApi.delete(id);
       removeVaultItem(id);
       if (selectedItem?.id === id) setSelectedItem(null);
-      toast.success('Item deleted');
-    } catch (err) { toast.error(parseApiError(err, 'Failed to delete')); }
+      toast.success('Item deleted', { id: tid });
+    } catch (err) { toast.error(parseApiError(err, 'Failed to delete'), { id: tid }); }
+    finally { setDeletingId(null); }
   };
 
   const handleToggleFav = async (item: VaultItem) => {
@@ -477,7 +486,8 @@ export default function Dashboard() {
                   <Edit2 size={16} />
                 </button>
                 <button onClick={() => handleDelete(selectedItem.id)} className="btn-ghost"
-                  style={{ padding: '8px 12px', color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.2)' }}>
+                  disabled={deletingId === selectedItem.id}
+                  style={{ padding: '8px 12px', color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.2)', opacity: deletingId === selectedItem.id ? 0.5 : 1 }}>
                   <Trash2 size={16} />
                 </button>
               </div>
