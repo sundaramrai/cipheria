@@ -1,8 +1,10 @@
-from sqlalchemy import create_engine, Column, String, DateTime, Text, Boolean, Integer
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
-from sqlalchemy.pool import NullPool
+﻿from sqlalchemy import create_engine, Column, String, Text, Boolean, Integer
+from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
+from sqlalchemy.types import TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.pool import NullPool
 from datetime import datetime, timezone
+from typing import Generator
 import uuid
 import os
 from dotenv import load_dotenv
@@ -40,8 +42,8 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     # Master password hint (never the actual password)
     master_hint = Column(String(255), nullable=True)
     # Salt for client-side key derivation
@@ -59,8 +61,8 @@ class VaultItem(Base):
     encrypted_data = Column(Text, nullable=False)        # JSON blob: {username, password, url, notes, ...}
     favicon_url = Column(String(512), nullable=True)
     is_favourite = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class AuditLog(Base):
@@ -68,10 +70,10 @@ class AuditLog(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    action = Column(String(64), nullable=False)          # LOGIN, CREATE_ITEM, DELETE_ITEM, etc.
+    action = Column(String(64), nullable=False)
     ip_address = Column(String(64), nullable=True)
     user_agent = Column(String(512), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class RefreshToken(Base):
@@ -80,12 +82,12 @@ class RefreshToken(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     token_hash = Column(String(255), nullable=False, unique=True)
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
     revoked = Column(Boolean, default=False)
 
 
-def get_db():
+def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
