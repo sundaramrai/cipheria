@@ -4,7 +4,7 @@ from typing import Annotated, Optional
 from uuid import UUID
 
 from database import get_db, VaultItem
-from schemas import VaultItemCreate, VaultItemUpdate, VaultItemResponse
+from schemas import VaultItemCreate, VaultItemUpdate, VaultItemResponse, VaultItemSummary
 from deps import CurrentUser, DBUser
 
 router = APIRouter(prefix="/vault", tags=["vault"])
@@ -37,8 +37,8 @@ def export_vault(
         ],
     }
 
-# list vault items with filters
-@router.get("", response_model=list[VaultItemResponse])
+# list vault items — metadata only (no encrypted_data) for fast load
+@router.get("", response_model=list[VaultItemSummary])
 def list_items(
     db: Annotated[Session, Depends(get_db)],
     current_user: CurrentUser,
@@ -46,16 +46,40 @@ def list_items(
     search: Annotated[Optional[str], Query(max_length=128)] = None,
     favourites_only: Annotated[bool, Query()] = False,
 ):
-    q = db.query(VaultItem).filter(VaultItem.user_id == current_user.id)
+    q = db.query(
+        VaultItem.id,
+        VaultItem.name,
+        VaultItem.category,
+        VaultItem.favicon_url,
+        VaultItem.is_favourite,
+        VaultItem.created_at,
+        VaultItem.updated_at,
+    ).filter(VaultItem.user_id == current_user.id)
 
     if category:
         q = q.filter(VaultItem.category == category)
     if search:
+        # Uses gin_trgm index when pg_trgm extension is enabled
         q = q.filter(VaultItem.name.ilike(f"%{search}%"))
     if favourites_only:
         q = q.filter(VaultItem.is_favourite.is_(True))
 
     return q.order_by(VaultItem.updated_at.desc()).all()
+
+# get single vault item with encrypted_data (called on item select)
+@router.get("/{item_id}", response_model=VaultItemResponse, responses={404: {"description": ITEM_NOT_FOUND_MSG}})
+def get_item(
+    item_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: CurrentUser,
+):
+    item = db.query(VaultItem).filter(
+        VaultItem.id == item_id,
+        VaultItem.user_id == current_user.id,
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
+    return item
 
 # create vault item
 @router.post("", response_model=VaultItemResponse, status_code=201)
