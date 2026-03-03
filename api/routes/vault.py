@@ -1,24 +1,24 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
-from database import get_db, VaultItem, User
-from schemas import VaultItemCreate, VaultItemUpdate, VaultItemResponse, VaultListResponse
-from deps import get_current_user, get_current_user_from_db, TokenUser
+from database import get_db, VaultItem
+from schemas import VaultItemCreate, VaultItemUpdate, VaultItemResponse
+from deps import CurrentUser, DBUser
 
 router = APIRouter(prefix="/vault", tags=["vault"])
 
 ITEM_NOT_FOUND_MSG = "Item not found"
 
-
+# export encrypted vault data
 @router.get("/export/json")
 def export_vault(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_db),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: DBUser,
 ):
-    """Export all vault items as encrypted JSON (data remains encrypted)."""
     items = db.query(VaultItem).filter(VaultItem.user_id == current_user.id).all()
+    
     return {
         "export_version": "1.0",
         "user_email": current_user.email,
@@ -37,35 +37,32 @@ def export_vault(
         ],
     }
 
-
-@router.get("", response_model=VaultListResponse)
+# list vault items with filters
+@router.get("", response_model=list[VaultItemResponse])
 def list_items(
-    category: Optional[str] = Query(None),
-    search: Optional[str] = Query(None, max_length=128),
-    favourites_only: bool = Query(False),
-    db: Session = Depends(get_db),
-    current_user: TokenUser = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: CurrentUser,
+    category: Annotated[Optional[str], Query()] = None,
+    search: Annotated[Optional[str], Query(max_length=128)] = None,
+    favourites_only: Annotated[bool, Query()] = False,
 ):
-    query = db.query(VaultItem).filter(VaultItem.user_id == current_user.id)
+    q = db.query(VaultItem).filter(VaultItem.user_id == current_user.id)
 
     if category:
-        query = query.filter(VaultItem.category == category)
+        q = q.filter(VaultItem.category == category)
     if search:
-        query = query.filter(VaultItem.name.ilike(f"%{search}%"))
+        q = q.filter(VaultItem.name.ilike(f"%{search}%"))
     if favourites_only:
-        query = query.filter(VaultItem.is_favourite == True)
+        q = q.filter(VaultItem.is_favourite.is_(True))
 
-    query = query.order_by(VaultItem.updated_at.desc())
-    items = query.all()
+    return q.order_by(VaultItem.updated_at.desc()).all()
 
-    return VaultListResponse(items=items, total=len(items))
-
-
+# create vault item
 @router.post("", response_model=VaultItemResponse, status_code=201)
 def create_item(
     body: VaultItemCreate,
-    db: Session = Depends(get_db),
-    current_user: TokenUser = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: CurrentUser,
 ):
     item = VaultItem(
         user_id=current_user.id,
@@ -77,30 +74,16 @@ def create_item(
     )
     db.add(item)
     db.commit()
+    db.refresh(item)
     return item
 
-
-@router.get("/{item_id}", response_model=VaultItemResponse)
-def get_item(
-    item_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: TokenUser = Depends(get_current_user),
-):
-    item = db.query(VaultItem).filter(
-        VaultItem.id == item_id,
-        VaultItem.user_id == current_user.id,
-    ).first()
-    if not item:
-        raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
-    return item
-
-
-@router.patch("/{item_id}", response_model=VaultItemResponse)
+# update vault item
+@router.patch("/{item_id}", response_model=VaultItemResponse, responses={404: {"description": ITEM_NOT_FOUND_MSG}})
 def update_item(
     item_id: UUID,
     body: VaultItemUpdate,
-    db: Session = Depends(get_db),
-    current_user: TokenUser = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: CurrentUser,
 ):
     item = db.query(VaultItem).filter(
         VaultItem.id == item_id,
@@ -114,14 +97,15 @@ def update_item(
         setattr(item, field, value)
 
     db.commit()
+    db.refresh(item)
     return item
 
-
-@router.delete("/{item_id}", status_code=204)
+# delete vault item
+@router.delete("/{item_id}", status_code=204, responses={404: {"description": ITEM_NOT_FOUND_MSG}})
 def delete_item(
     item_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: TokenUser = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: CurrentUser,
 ):
     item = db.query(VaultItem).filter(
         VaultItem.id == item_id,
