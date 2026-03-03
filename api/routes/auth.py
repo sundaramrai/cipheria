@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from jose import JWTError
+from typing import Annotated
 
 from database import get_db, User, AuditLog, RefreshToken
 from crypto import (
@@ -25,8 +26,8 @@ def log_action(db: Session, user_id, action: str, request: Request):
     db.add(entry)
 
 
-@router.post("/register", response_model=TokenResponse, status_code=201)
-def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+@router.post("/register", response_model=TokenResponse, status_code=201, responses={400: {"description": "Email already registered"}})
+def register(body: RegisterRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
     if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -59,8 +60,8 @@ def register(body: RegisterRequest, request: Request, db: Session = Depends(get_
     )
 
 
-@router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
+@router.post("/login", response_model=TokenResponse, responses={401: {"description": "Invalid email or password"}})
+def login(body: LoginRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
     user = db.query(User).filter(User.email == body.email).first()
     # Check is_active and password in one condition to avoid leaking account state
     if not user or not user.is_active or not verify_password(body.password, user.hashed_password):
@@ -85,8 +86,8 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/refresh", response_model=TokenResponse)
-def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
+@router.post("/refresh", response_model=TokenResponse, responses={401: {"description": "Invalid or expired refresh token"}})
+def refresh(body: RefreshRequest, db: Annotated[Session, Depends(get_db)]):
     try:
         payload = decode_token(body.refresh_token)
         if payload.get("type") != "refresh":
@@ -129,7 +130,7 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/logout")
-def logout(body: RefreshRequest, db: Session = Depends(get_db)):
+def logout(body: RefreshRequest, db: Annotated[Session, Depends(get_db)]):
     token_hash = hash_refresh_token(body.refresh_token)
     stored = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
     if stored:
@@ -139,5 +140,5 @@ def logout(body: RefreshRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserResponse)
-def me(current_user: User = Depends(get_current_user_from_db)):
+def me(current_user: Annotated[User, Depends(get_current_user_from_db)]):
     return current_user
