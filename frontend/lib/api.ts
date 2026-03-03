@@ -1,48 +1,46 @@
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// In dev: empty string → Next.js proxy forwards /api/* to the backend (keeps cookies same-origin).
+// In prod: set NEXT_PUBLIC_API_URL to your API origin (e.g. https://api.example.com).
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
+
+// In-memory access token — never touches Web Storage, invisible to XSS
+let _accessToken: string | null = null;
+export const setAccessToken = (token: string | null) => { _accessToken = token; };
+export const getAccessToken = () => _accessToken;
 
 export const api = axios.create({
   baseURL: API_URL,
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,  // send HttpOnly refresh-token cookie automatically
 });
 
 // Attach access token to every request
 api.interceptors.request.use((config) => {
-  if (globalThis.window !== undefined) {
-    const token = sessionStorage.getItem('access_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+  const token = _accessToken;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
 
-// Auto-refresh on 401
+// Auto-refresh on 401 (but not when the refresh endpoint itself fails)
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
+    const isRefreshCall = original?.url?.includes('/api/auth/refresh');
+    if (error.response?.status === 401 && !original._retry && !isRefreshCall) {
       original._retry = true;
       try {
-        const refreshToken = localStorage.getItem('refresh_token');
-        if (!refreshToken) throw new Error('No refresh token');
-
-        const { data } = await axios.post(`${API_URL}/api/auth/refresh`, {
-          refresh_token: refreshToken,
-        });
-
-        sessionStorage.setItem('access_token', data.access_token);
-        localStorage.setItem('refresh_token', data.refresh_token);
+        // Cookie is sent automatically via withCredentials
+        const { data } = await axios.post(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true });
+        setAccessToken(data.access_token);
         original.headers.Authorization = `Bearer ${data.access_token}`;
         return api(original);
       } catch {
-        // Refresh failed — clear tokens and redirect to login
-        sessionStorage.clear();
-        localStorage.removeItem('refresh_token');
-        localStorage.removeItem('vault_salt');
-        globalThis.location.href = '/auth';
+        // Refresh failed — clear token; callers handle redirect
+        setAccessToken(null);
       }
     }
     throw error;
@@ -58,11 +56,11 @@ export const authApi = {
   login: (email: string, password: string) =>
     api.post('/api/auth/login', { email, password }),
 
-  refresh: (refreshToken: string) =>
-    api.post('/api/auth/refresh', { refresh_token: refreshToken }),
+  refresh: () =>
+    api.post('/api/auth/refresh'),
 
-  logout: (refreshToken: string) =>
-    api.post('/api/auth/logout', { refresh_token: refreshToken }),
+  logout: () =>
+    api.post('/api/auth/logout'),
 
   me: () => api.get('/api/auth/me'),
 };
@@ -72,8 +70,6 @@ export const authApi = {
 export const vaultApi = {
   list: (params?: { category?: string; search?: string; favourites_only?: boolean }) =>
     api.get('/api/vault', { params }),
-
-  get: (id: string) => api.get(`/api/vault/${id}`),
 
   create: (data: {
     name: string;
