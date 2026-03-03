@@ -13,17 +13,17 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-# Neon requires SSL; normalize legacy postgres:// scheme
+# Normalize legacy postgres:// scheme
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# NullPool is required for serverless (Vercel/Lambda) — each invocation is a fresh
-# process so persistent connection pools exhaust Neon's connection limit and cause 500s.
-engine = create_engine(
-    DATABASE_URL,
-    poolclass=NullPool,
-    connect_args={"sslmode": "require"} if "neon.tech" in DATABASE_URL else {},
-)
+# Append SSL + timeout params for Neon if not already present
+if "neon.tech" in DATABASE_URL and "sslmode" not in DATABASE_URL:
+    sep = "&" if "?" in DATABASE_URL else "?"
+    DATABASE_URL += f"{sep}sslmode=require&connect_timeout=10"
+
+# NullPool is required for serverless — no persistent connections kept between requests
+engine = create_engine(DATABASE_URL, poolclass=NullPool)
 
 # expire_on_commit=False: keeps objects usable after commit without an extra SELECT
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
