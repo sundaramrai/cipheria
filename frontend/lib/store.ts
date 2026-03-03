@@ -13,7 +13,7 @@ export interface VaultItem {
   id: string;
   name: string;
   category: string;
-  encrypted_data: string;
+  encrypted_data?: string;  // Only present after fetching the detail endpoint
   favicon_url?: string;
   is_favourite: boolean;
   created_at: string;
