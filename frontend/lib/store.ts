@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { authApi } from '@/lib/api';
+import { authApi, setAccessToken, getAccessToken } from '@/lib/api';
 
 interface User {
   id: string;
@@ -9,7 +9,7 @@ interface User {
   master_hint?: string;
 }
 
-interface VaultItem {
+export interface VaultItem {
   id: string;
   name: string;
   category: string;
@@ -20,14 +20,22 @@ interface VaultItem {
   updated_at: string;
   // Decrypted fields (populated client-side)
   decrypted?: {
+    // login
     username?: string;
     password?: string;
     url?: string;
-    notes?: string;
+    // card
     cardNumber?: string;
     cardHolder?: string;
     expiry?: string;
     cvv?: string;
+    // identity
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+    address?: string;
+    // shared
+    notes?: string;
   };
 }
 
@@ -38,7 +46,7 @@ interface AuthStore {
   vaultItems: VaultItem[];
   isVaultLocked: boolean;
 
-  setAuth: (user: User, accessToken: string, refreshToken: string) => void;
+  setAuth: (user: User, accessToken: string) => void;
   setVaultKey: (key: CryptoKey) => void;
   setVaultItems: (items: VaultItem[]) => void;
   updateVaultItem: (id: string, item: VaultItem) => void;
@@ -56,10 +64,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
   vaultItems: [],
   isVaultLocked: true,
 
-  setAuth: (user, accessToken, refreshToken) => {
-    sessionStorage.setItem('access_token', accessToken);
-    localStorage.setItem('refresh_token', refreshToken);
-    localStorage.setItem('vault_salt', user.vault_salt);
+  setAuth: (user, accessToken) => {
+    setAccessToken(accessToken);
     set({ user, isAuthenticated: true });
   },
 
@@ -82,30 +88,24 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   restoreSession: async () => {
     try {
-      let token = sessionStorage.getItem('access_token');
+      let token = getAccessToken();
       if (!token) {
-        const refreshToken = localStorage.getItem('refresh_token');
-        if (!refreshToken) return false;
-        const { data: refreshData } = await authApi.refresh(refreshToken);
+        // Cookie is sent automatically — no localStorage needed
+        const { data: refreshData } = await authApi.refresh();
         token = refreshData.access_token;
-        sessionStorage.setItem('access_token', token as string);
-        localStorage.setItem('refresh_token', refreshData.refresh_token);
-        localStorage.setItem('vault_salt', refreshData.vault_salt);
+        setAccessToken(token as string);
       }
       const { data: user } = await authApi.me();
-      localStorage.setItem('vault_salt', user.vault_salt);
       set({ user, isAuthenticated: true });
       return true;
     } catch {
-      sessionStorage.removeItem('access_token');
+      setAccessToken(null);
       return false;
     }
   },
 
   logout: () => {
-    sessionStorage.clear();
-    localStorage.removeItem('refresh_token');
-    localStorage.removeItem('vault_salt');
+    setAccessToken(null);
     set({
       user: null,
       cryptoKey: null,
