@@ -1,53 +1,52 @@
+from typing import Annotated
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from jose import JWTError
 import uuid
-
 from database import get_db, User
 from crypto import decode_token
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
-
-class TokenUser:
-    """Lightweight user derived from JWT only — no DB round-trip."""
-    __slots__ = ("id",)
-
-    def __init__(self, user_id: str):
-        self.id = uuid.UUID(user_id)
-
-
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> TokenUser:
-    """Validate JWT and return a TokenUser — zero DB queries."""
-    error = HTTPException(
+def auth_exception() -> HTTPException:
+    return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+class TokenUser:
+    def __init__(self, user_id: str):
+        try:
+            self.id = uuid.UUID(user_id)
+        except ValueError:
+            raise auth_exception()
+
+def get_current_token_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+) -> TokenUser:
+    if credentials is None:
+        raise auth_exception()
     try:
         payload = decode_token(credentials.credentials)
-        user_id: str = payload.get("sub")
-        if not user_id or payload.get("type") != "access":
-            raise error
+        if payload.get("type") != "access":
+            raise auth_exception()
+        user_id: str | None = payload.get("sub")
+        if not user_id:
+            raise auth_exception()
+        return TokenUser(user_id)
     except JWTError:
-        raise error
-    return TokenUser(user_id)
-
+        raise auth_exception()
 
 def get_current_user_from_db(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db),
+    token_user: Annotated[TokenUser, Depends(get_current_token_user)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> User:
-    """Full DB lookup — use only when the complete User row is needed (e.g. /me)."""
-    token_user = get_current_user(credentials)
     user = db.query(User).filter(User.id == token_user.id).first()
-    if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    if not user or not user.is_active:
+        raise auth_exception()
     return user
+
+CurrentUser = Annotated[TokenUser, Depends(get_current_token_user)]
+DBUser = Annotated[User, Depends(get_current_user_from_db)]
