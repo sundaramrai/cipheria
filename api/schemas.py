@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from uuid import UUID
 
@@ -35,7 +35,9 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    vault_salt: str  # Client uses this for PBKDF2 key derivation
+    vault_salt: str
+
+
 class UserResponse(BaseModel):
     id: UUID
     email: str
@@ -105,4 +107,10 @@ class VaultItemResponse(BaseModel):
         from_attributes = True
 
 
-
+class PaginatedVaultResponse(BaseModel):
+    """Paginated wrapper for vault list endpoint."""
+    items: List[VaultItemSummary]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
