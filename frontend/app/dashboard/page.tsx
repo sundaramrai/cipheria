@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Key, Search, Plus, LogOut, Lock, Star, Globe, CreditCard, StickyNote, User,
@@ -19,6 +19,71 @@ const CATEGORY_ICONS: Record<string, any> = {
   identity: User,
 };
 
+const IDLE_MS = 5 * 60 * 1000;
+const genOptions = { length: 20, uppercase: true, lowercase: true, numbers: true, symbols: true };
+const emptyForm = {
+  name: '', category: 'login',
+  username: '', password: '', url: '', notes: '',
+  cardNumber: '', cardHolder: '', expiry: '', cvv: '',
+  firstName: '', lastName: '', phone: '', address: '',
+};
+
+const parseApiError = (err: any, fallback: string): string => {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail) && detail.length > 0)
+    return detail.map((d: any) => String(d.msg ?? d).replace(/^Value error,\s*/i, '')).join('; ');
+  return fallback;
+};
+
+const tryGetFaviconUrl = (url: string): string | undefined => {
+  try {
+    const { hostname } = new URL(url.includes('://') ? url : `https://${url}`);
+    return `https://www.google.com/s2/favicons?domain=${hostname}&sz=64`;
+  } catch {
+    return undefined;
+  }
+};
+
+const getItemLoadError = (err: any): string => {
+  if (err?.message === 'CRYPTO_FAIL') return 'Decrypt failed — wrong master password?';
+  if (err?.message === 'BAD_FORMAT') return 'Item data is corrupted';
+  if (err?.message === 'NO_KEY') return 'Vault is locked — please re-enter master password';
+  if (err?.response?.status === 404) return 'Item not found';
+  if (err?.response?.status === 401) return 'Session expired — please sign in again';
+  return 'Failed to load item';
+};
+
+const fetchAndDecryptItem = async (item: VaultItem): Promise<VaultItem> => {
+  const { data } = await vaultApi.get(item.id);
+  if (!data.encrypted_data?.includes('.')) throw new Error('BAD_FORMAT');
+  const { cryptoKey: key } = useAuthStore.getState();
+  if (!key) throw new Error('NO_KEY');
+  let dec: any;
+  try {
+    dec = await decryptData(data.encrypted_data, key);
+  } catch (cryptoErr) {
+    console.error('[decrypt] WebCrypto error for item', item.id, cryptoErr);
+    throw new Error('CRYPTO_FAIL');
+  }
+  const enriched: VaultItem = { ...item, encrypted_data: data.encrypted_data, decrypted: dec };
+  useAuthStore.getState().updateVaultItem(item.id, enriched);
+  return enriched;
+};
+
+const buildPayload = (form: typeof emptyForm) => {
+  switch (form.category) {
+    case 'card':
+      return { cardNumber: form.cardNumber, cardHolder: form.cardHolder, expiry: form.expiry, cvv: form.cvv, notes: form.notes };
+    case 'identity':
+      return { firstName: form.firstName, lastName: form.lastName, phone: form.phone, address: form.address, notes: form.notes };
+    case 'note':
+      return { notes: form.notes };
+    default:
+      return { username: form.username, password: form.password, url: form.url, notes: form.notes };
+  }
+};
+
 // Custom hook for vault unlock logic
 function useVaultUnlock(user: any, setVaultKey: any, setVaultItems: any) {
   const [masterPassword, setMasterPassword] = useState('');
@@ -29,26 +94,41 @@ function useVaultUnlock(user: any, setVaultKey: any, setVaultItems: any) {
     setUnlocking(true);
     const tid = toast.loading('Unlocking vault...');
     try {
-      const salt = user?.vault_salt || '';
-      const key = await deriveKey(masterPassword, salt);
-      setVaultKey(key);
+      const salt = user?.vault_salt;
+      if (!salt) throw new Error('NO_SALT');
 
+      const key = await deriveKey(masterPassword, salt);
+
+      // Verify the master password is correct before accepting it.
+      // Fetch one item and try to decrypt it — if it fails the password is wrong.
+      toast.loading('Verifying master password...', { id: tid });
+      const { data: items } = await vaultApi.list();
+
+      if (items.length > 0) {
+        try {
+          const { data: firstItem } = await vaultApi.get(items[0].id);
+          await decryptData(firstItem.encrypted_data, key);
+        } catch (verifyErr) {
+          console.error('[unlock] Key verification failed:', verifyErr);
+          throw new Error('WRONG_PASSWORD');
+        }
+      }
+
+      // Key verified — commit to store and load all items
+      setVaultKey(key);
       toast.loading('Loading items...', { id: tid });
-      const { data } = await vaultApi.list();
-      const decrypted = await Promise.all(
-        data.map(async (item: any) => {
-          try {
-            const dec = await decryptData(item.encrypted_data, key);
-            return { ...item, decrypted: dec };
-          } catch { return item; }
-        })
-      );
-      setVaultItems(decrypted);
+      setVaultItems(items);
       setMasterPassword('');
       toast.success('Vault unlocked', { id: tid });
-    } catch (err) {
-      toast.error('Wrong master password or corrupted data', { id: tid });
-      console.error('Vault unlock error:', err);
+    } catch (err: any) {
+      if (err?.message === 'WRONG_PASSWORD') {
+        toast.error('Wrong master password', { id: tid });
+      } else if (err?.message === 'NO_SALT') {
+        toast.error('Session error — please sign out and sign in again', { id: tid });
+      } else {
+        toast.error('Failed to unlock vault', { id: tid });
+      }
+      console.error('[unlock] Error:', err);
     } finally {
       setUnlocking(false);
     }
@@ -66,25 +146,93 @@ export default function Dashboard() {
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<VaultItem | null>(null);
-  const [newItem, setNewItem] = useState({
-    name: '', category: 'login',
-    username: '', password: '', url: '', notes: '',
-    cardNumber: '', cardHolder: '', expiry: '', cvv: '',
-    firstName: '', lastName: '', phone: '', address: '',
-  });
-  const emptyForm = { name: '', category: 'login', username: '', password: '', url: '', notes: '', cardNumber: '', cardHolder: '', expiry: '', cvv: '', firstName: '', lastName: '', phone: '', address: '' };
-  const genOptions = { length: 20, uppercase: true, lowercase: true, numbers: true, symbols: true };
+  const [newItem, setNewItem] = useState(emptyForm);
   const [sessionLoading, setSessionLoading] = useState(true);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const IDLE_MS = 5 * 60 * 1000;
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState<typeof newItem | null>(null);
   const [savingItem, setSavingItem] = useState(false);
   const [updatingItem, setUpdatingItem] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedItemLoading, setSelectedItemLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState<VaultItem[] | null>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const decryptingItemIds = useRef(new Set<string>());  // in-flight + completed fetches
+  const currentSelectionRef = useRef<string | null>(null); // prevent overwrite on nav away
   const [hibp, setHibp] = useState<{ checking: boolean; count: number | null }>({ checking: false, count: null });
 
   const { masterPassword, setMasterPassword, unlocking, unlockVault } = useVaultUnlock(user, setVaultKey, setVaultItems);
+
+  // Fetch full item (with encrypted_data) on demand and decrypt client-side.
+  // Reads cryptoKey from the store directly (not from closure) to always have the latest key.
+  const handleSelectItem = useCallback(async (item: VaultItem) => {
+    setSelectedItem(item);
+    setHibp({ checking: false, count: null });
+    currentSelectionRef.current = item.id;
+
+    // Always read live state \u2014 avoids stale-closure key and stale cache
+    const { vaultItems: storeItems, cryptoKey: liveKey } = useAuthStore.getState();
+    const cached = storeItems.find((v) => v.id === item.id);
+    if (cached?.decrypted) {
+      setSelectedItem(cached);
+      return;
+    }
+
+    if (!liveKey) return;
+
+    // Guard: only one fetch per item. Removed from set only on error so future
+    // cache checks hit the store, not this guard.
+    if (decryptingItemIds.current.has(item.id)) return;
+    decryptingItemIds.current.add(item.id);
+
+    setSelectedItemLoading(true);
+    try {
+      const enriched = await fetchAndDecryptItem(item);
+      // Only update the panel if the user hasn't clicked a different item
+      if (currentSelectionRef.current === item.id) {
+        setSelectedItem(enriched);
+      }
+    } catch (err: any) {
+      console.error('[handleSelectItem] Failed for item', item.id, err);
+      toast.error(getItemLoadError(err));
+      // Allow retry on failure
+      decryptingItemIds.current.delete(item.id);
+    } finally {
+      if (currentSelectionRef.current === item.id) {
+        setSelectedItemLoading(false);
+      }
+    }
+  }, []);  // no deps \u2014 reads everything live from the store
+
+  // Debounced server-side search with AbortController to cancel stale requests
+  const handleSearchChange = useCallback((val: string) => {
+    setSearch(val);
+
+    // Cancel any pending debounce timer
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    // Abort any in-flight search request immediately
+    searchAbortRef.current?.abort();
+
+    if (!val) { setSearchResults(null); return; }
+
+    searchDebounceRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
+      try {
+        const { data } = await vaultApi.list({ search: val }, controller.signal);
+        // Reject stale responses: if the search input changed before response arrived
+        if (!controller.signal.aborted) {
+          setSearchResults(data);
+        }
+      } catch (err: any) {
+        // Ignore abort errors — they are expected when the user types ahead
+        if (err?.code !== 'ERR_CANCELED' && err?.name !== 'AbortError') {
+          console.error('Search error:', err);
+        }
+      }
+    }, 300);
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -119,22 +267,15 @@ export default function Dashboard() {
     };
   }, [isVaultLocked]);
 
-  const parseApiError = (err: any, fallback: string): string => {
-    const detail = err?.response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-    if (Array.isArray(detail) && detail.length > 0)
-      return detail.map((d: any) => String(d.msg ?? d).replace(/^Value error,\s*/i, '')).join('; ');
-    return fallback;
-  };
-
-  const tryGetFaviconUrl = (url: string): string | undefined => {
-    try {
-      const { hostname } = new URL(url.includes('://') ? url : `https://${url}`);
-      return `https://www.google.com/s2/favicons?domain=${hostname}&sz=64`;
-    } catch {
-      return undefined;
+  // Clear search state and decrypt tracking whenever the vault is locked
+  useEffect(() => {
+    if (isVaultLocked) {
+      setSearch('');
+      setSearchResults(null);
+      decryptingItemIds.current.clear();
+      currentSelectionRef.current = null;
     }
-  };
+  }, [isVaultLocked]);
 
   const handleLogout = async () => {
     try { await authApi.logout(); } catch { }
@@ -142,17 +283,10 @@ export default function Dashboard() {
     router.push('/auth');
   };
 
-  const buildPayload = (form: typeof emptyForm) => {
-    switch (form.category) {
-      case 'card':
-        return { cardNumber: form.cardNumber, cardHolder: form.cardHolder, expiry: form.expiry, cvv: form.cvv, notes: form.notes };
-      case 'identity':
-        return { firstName: form.firstName, lastName: form.lastName, phone: form.phone, address: form.address, notes: form.notes };
-      case 'note':
-        return { notes: form.notes };
-      default:
-        return { username: form.username, password: form.password, url: form.url, notes: form.notes };
-    }
+  const buildEncryptedPayload = async (form: typeof emptyForm) => {
+    const payload = buildPayload(form);
+    const encrypted_data = await encryptData(payload, cryptoKey!);
+    return { payload, encrypted_data };
   };
 
   const handleAddItem = async (e: React.FormEvent) => {
@@ -165,16 +299,9 @@ export default function Dashboard() {
     setSavingItem(true);
     const tid = toast.loading('Saving to vault...');
     try {
-      const payload = buildPayload(newItem);
-      const encrypted_data = await encryptData(payload, cryptoKey);
+      const { payload, encrypted_data } = await buildEncryptedPayload(newItem);
       const favicon_url = newItem.url ? tryGetFaviconUrl(newItem.url) : undefined;
-
-      const { data } = await vaultApi.create({
-        name: newItem.name,
-        category: newItem.category,
-        encrypted_data,
-        favicon_url,
-      });
+      const { data } = await vaultApi.create({ name: newItem.name, category: newItem.category, encrypted_data, favicon_url });
       addVaultItem({ ...data, decrypted: payload });
       setShowAddModal(false);
       setNewItem(emptyForm);
@@ -205,14 +332,9 @@ export default function Dashboard() {
     setUpdatingItem(true);
     const tid = toast.loading('Updating item...');
     try {
-      const payload = buildPayload(editForm);
-      const encrypted_data = await encryptData(payload, cryptoKey);
-      const favicon_url = editForm.url
-        ? tryGetFaviconUrl(editForm.url) ?? selectedItem.favicon_url
-        : selectedItem.favicon_url;
-      const { data } = await vaultApi.update(selectedItem.id, {
-        name: editForm.name, category: editForm.category, encrypted_data, favicon_url,
-      });
+      const { payload, encrypted_data } = await buildEncryptedPayload(editForm);
+      const favicon_url = editForm.url ? tryGetFaviconUrl(editForm.url) ?? selectedItem.favicon_url : selectedItem.favicon_url;
+      const { data } = await vaultApi.update(selectedItem.id, { name: editForm.name, category: editForm.category, encrypted_data, favicon_url });
       const updated = { ...data, decrypted: payload };
       updateVaultItem(selectedItem.id, updated);
       setSelectedItem(updated);
@@ -262,11 +384,10 @@ export default function Dashboard() {
     } catch { toast.error('Export failed'); }
   };
 
-  const filteredItems = vaultItems.filter((item) => {
-    if (category !== 'all' && item.category !== category) return false;
-    if (search && !item.name.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
+  const filteredItems = useMemo(
+    () => (searchResults ?? vaultItems).filter((item) => category === 'all' || item.category === category),
+    [searchResults, vaultItems, category],
+  );
 
   if (isVaultLocked) {
     return <LockedVaultScreen user={user} masterPassword={masterPassword} setMasterPassword={setMasterPassword} unlocking={unlocking} unlockVault={unlockVault} handleLogout={handleLogout} />;
@@ -280,7 +401,7 @@ export default function Dashboard() {
     );
   }
 
-  return <MainDashboard user={user} category={category} setCategory={setCategory} search={setSearch} handleExport={handleExport} lockVault={lockVault} handleLogout={handleLogout} vaultItems={vaultItems} selectedItem={selectedItem} setSelectedItem={setSelectedItem} handleToggleFav={handleToggleFav} handleOpenEdit={handleOpenEdit} handleDelete={handleDelete} deletingId={deletingId} copyToClipboard={copyToClipboard} hibp={hibp} setHibp={setHibp} showAddModal={showAddModal} setShowAddModal={setShowAddModal} newItem={newItem} setNewItem={setNewItem} savingItem={savingItem} genOptions={genOptions} handleAddItem={handleAddItem} showEditModal={showEditModal} setShowEditModal={setShowEditModal} editForm={editForm} setEditForm={setEditForm} updatingItem={updatingItem} handleEditItem={handleEditItem} filteredItems={filteredItems} />;
+  return <MainDashboard user={user} category={category} setCategory={setCategory} searchValue={search} onSearchChange={handleSearchChange} handleExport={handleExport} lockVault={lockVault} handleLogout={handleLogout} vaultItems={vaultItems} selectedItem={selectedItem} handleSelectItem={handleSelectItem} selectedItemLoading={selectedItemLoading} handleToggleFav={handleToggleFav} handleOpenEdit={handleOpenEdit} handleDelete={handleDelete} deletingId={deletingId} copyToClipboard={copyToClipboard} hibp={hibp} setHibp={setHibp} showAddModal={showAddModal} setShowAddModal={setShowAddModal} newItem={newItem} setNewItem={setNewItem} savingItem={savingItem} genOptions={genOptions} handleAddItem={handleAddItem} showEditModal={showEditModal} setShowEditModal={setShowEditModal} editForm={editForm} setEditForm={setEditForm} updatingItem={updatingItem} handleEditItem={handleEditItem} filteredItems={filteredItems} />;
 }
 
 function LockedVaultScreen({ user, masterPassword, setMasterPassword, unlocking, unlockVault, handleLogout }: Readonly<any>) {
@@ -337,7 +458,7 @@ function LockedVaultScreen({ user, masterPassword, setMasterPassword, unlocking,
 }
 
 function MainDashboard(props: Readonly<any>) {
-  const { user, category, search, handleExport, lockVault, handleLogout, vaultItems, setShowAddModal, selectedItem, setSelectedItem, handleToggleFav, handleOpenEdit, handleDelete, deletingId, copyToClipboard, hibp, setHibp, showAddModal, newItem, setNewItem, savingItem, genOptions, handleAddItem, showEditModal, setShowEditModal, editForm, setEditForm, updatingItem, handleEditItem, filteredItems } = props;
+  const { user, category, searchValue, onSearchChange, handleExport, lockVault, handleLogout, vaultItems, setShowAddModal, selectedItem, handleSelectItem, selectedItemLoading, handleToggleFav, handleOpenEdit, handleDelete, deletingId, copyToClipboard, hibp, setHibp, showAddModal, newItem, setNewItem, savingItem, genOptions, handleAddItem, showEditModal, setShowEditModal, editForm, setEditForm, updatingItem, handleEditItem, filteredItems } = props;
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
@@ -399,8 +520,8 @@ function MainDashboard(props: Readonly<any>) {
             <input
               className="input-field"
               placeholder="Search vault..."
-              value={search}
-              onChange={(e) => props.search(e.target.value)}
+              value={searchValue}
+              onChange={(e) => onSearchChange(e.target.value)}
               style={{ paddingLeft: 36 }}
             />
           </div>
@@ -419,7 +540,7 @@ function MainDashboard(props: Readonly<any>) {
           ) : filteredItems.map((item: any) => {
             const Icon = CATEGORY_ICONS[item.category] || Globe;
             return (
-              <button key={item.id} onClick={() => setSelectedItem(item)} style={{
+              <button key={item.id} onClick={() => handleSelectItem(item)} style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 12,
                 padding: '12px', borderRadius: 10, border: 'none', cursor: 'pointer',
                 background: selectedItem?.id === item.id ? 'var(--accent-dim)' : 'transparent',
@@ -451,12 +572,18 @@ function MainDashboard(props: Readonly<any>) {
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
-        {selectedItem == null ? (
+        {selectedItem == null && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12, opacity: 0.4 }}>
             <Shield size={48} color="var(--text-secondary)" />
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Select an item to view details</p>
           </div>
-        ) : (
+        )}
+        {selectedItem != null && selectedItemLoading && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12, opacity: 0.5 }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Decrypting…</p>
+          </div>
+        )}
+        {selectedItem != null && !selectedItemLoading && (
           <div className="animate-fade-up" style={{ maxWidth: 560 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 32 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
