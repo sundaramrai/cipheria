@@ -14,10 +14,13 @@ from schemas import RegisterRequest, LoginRequest, TokenResponse, UserResponse
 from deps import get_current_user_from_db
 
 import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from index import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-IS_PROD = os.getenv("ENVIRONMENT", "development") == "production"
+IS_PROD = os.getenv("ENVIRONMENT", "production") == "production"
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
@@ -26,7 +29,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         key="refresh_token",
         value=token,
         httponly=True,
-        secure=IS_PROD,   # True in production (HTTPS), False in dev (HTTP)
+        secure=IS_PROD,
         samesite="lax",
         max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         path="/api/auth",
@@ -43,7 +46,13 @@ def log_action(db: Session, user_id, action: str, request: Request):
     db.add(entry)
 
 
-@router.post("/register", response_model=TokenResponse, status_code=201, responses={400: {"description": "Email already registered"}})
+@router.post(
+    "/register",
+    response_model=TokenResponse,
+    status_code=201,
+    responses={400: {"description": "Email already registered"}},
+)
+@limiter.limit("5/minute")        # max 5 registrations per IP per minute
 def register(
     body: RegisterRequest,
     request: Request,
@@ -61,7 +70,7 @@ def register(
         vault_salt=generate_salt(32),
     )
     db.add(user)
-    db.flush()  # get user.id before commit
+    db.flush()
 
     access_token = create_access_token({"sub": str(user.id)})
     refresh_token = create_refresh_token({"sub": str(user.id)})
@@ -74,17 +83,18 @@ def register(
     db.add(rt)
 
     log_action(db, user.id, "REGISTER", request)
-
     db.commit()
     _set_refresh_cookie(response, refresh_token)
 
-    return TokenResponse(
-        access_token=access_token,
-        vault_salt=user.vault_salt,
-    )
+    return TokenResponse(access_token=access_token, vault_salt=user.vault_salt)
 
 
-@router.post("/login", response_model=TokenResponse, responses={401: {"description": "Invalid email or password"}})
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    responses={401: {"description": "Invalid email or password"}},
+)
+@limiter.limit("10/minute")       # max 10 login attempts per IP per minute
 def login(
     body: LoginRequest,
     request: Request,
@@ -107,18 +117,20 @@ def login(
     db.add(rt)
 
     log_action(db, user.id, "LOGIN", request)
-
     db.commit()
     _set_refresh_cookie(response, refresh_token)
 
-    return TokenResponse(
-        access_token=access_token,
-        vault_salt=user.vault_salt,
-    )
+    return TokenResponse(access_token=access_token, vault_salt=user.vault_salt)
 
 
-@router.post("/refresh", response_model=TokenResponse, responses={401: {"description": "Invalid token type, Invalid refresh token, Refresh token expired or revoked, or Account not found or disabled"}})
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    responses={401: {"description": "Invalid or expired refresh token"}},
+)
+@limiter.limit("20/minute")       # slightly more generous — client auto-refreshes
 def refresh(
+    request: Request,
     response: Response,
     db: Annotated[Session, Depends(get_db)],
     refresh_token: Annotated[Optional[str], Cookie()] = None,
@@ -148,7 +160,6 @@ def refresh(
     stored.revoked = True
 
     user = db.query(User).filter(User.id == user_id).first()
-
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Account not found or disabled")
 
@@ -161,14 +172,10 @@ def refresh(
         expires_at=datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
     )
     db.add(new_rt)
-
     db.commit()
     _set_refresh_cookie(response, new_refresh)
 
-    return TokenResponse(
-        access_token=new_access,
-        vault_salt=user.vault_salt,
-    )
+    return TokenResponse(access_token=new_access, vault_salt=user.vault_salt)
 
 
 @router.post("/logout")
