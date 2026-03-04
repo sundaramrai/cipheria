@@ -23,8 +23,7 @@
     "clipboardWrite"
   ],
   "host_permissions": [
-    "https://*/*",
-    "http://*/*"
+    "https://cipheria.vercel.app/*"
   ],
   "background": {
     "service_worker": "background.js",
