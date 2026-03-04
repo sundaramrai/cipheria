@@ -90,7 +90,8 @@ function useVaultUnlock(user: any, setVaultKey: any, setVaultItems: any) {
           // Verify the master password is correct before accepting it.
           // Fetch one item and try to decrypt it — if it fails the password is wrong.
           update('Verifying master password...');
-          const { data: items } = await vaultApi.list();
+          const { data: listResult } = await vaultApi.list();
+          const items = listResult.items;
 
           if (items.length > 0) {
             try {
@@ -212,7 +213,7 @@ export default function Dashboard() {
         const { data } = await vaultApi.list({ search: val }, controller.signal);
         // Reject stale responses: if the search input changed before response arrived
         if (!controller.signal.aborted) {
-          setSearchResults(data);
+          setSearchResults(data.items);
         }
       } catch (err: any) {
         // Ignore abort errors — they are expected when the user types ahead
