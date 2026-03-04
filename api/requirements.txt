@@ -9,3 +9,7 @@ pydantic-settings==2.2.1
 cryptography==42.0.7
 python-dotenv==1.0.1
 certifi==2024.2.2
+slowapi==0.1.9
+alembic==1.13.1
+redis==5.0.4
+limits==3.10.1
