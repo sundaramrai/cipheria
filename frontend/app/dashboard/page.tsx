@@ -5,7 +5,8 @@ import {
   Key, Search, Plus, LogOut, Lock, Star, Globe, CreditCard, StickyNote, User,
   Copy, Eye, EyeOff, Trash2, Download, Shield, X, RefreshCw, Edit2
 } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { toastService } from '@/lib/toast';
+import { getItemLoadError } from '@/lib/errors';
 import { useAuthStore, VaultItem } from '@/lib/store';
 import { vaultApi, authApi } from '@/lib/api';
 import { deriveKey, encryptData, decryptData, generatePassword, passwordStrength, checkHIBP } from '@/lib/crypto';
@@ -28,14 +29,6 @@ const emptyForm = {
   firstName: '', lastName: '', phone: '', address: '',
 };
 
-const parseApiError = (err: any, fallback: string): string => {
-  const detail = err?.response?.data?.detail;
-  if (typeof detail === 'string') return detail;
-  if (Array.isArray(detail) && detail.length > 0)
-    return detail.map((d: any) => String(d.msg ?? d).replace(/^Value error,\s*/i, '')).join('; ');
-  return fallback;
-};
-
 const tryGetFaviconUrl = (url: string): string | undefined => {
   try {
     const { hostname } = new URL(url.includes('://') ? url : `https://${url}`);
@@ -43,15 +36,6 @@ const tryGetFaviconUrl = (url: string): string | undefined => {
   } catch {
     return undefined;
   }
-};
-
-const getItemLoadError = (err: any): string => {
-  if (err?.message === 'CRYPTO_FAIL') return 'Decrypt failed — wrong master password?';
-  if (err?.message === 'BAD_FORMAT') return 'Item data is corrupted';
-  if (err?.message === 'NO_KEY') return 'Vault is locked — please re-enter master password';
-  if (err?.response?.status === 404) return 'Item not found';
-  if (err?.response?.status === 401) return 'Session expired — please sign in again';
-  return 'Failed to load item';
 };
 
 const fetchAndDecryptItem = async (item: VaultItem): Promise<VaultItem> => {
@@ -92,43 +76,46 @@ function useVaultUnlock(user: any, setVaultKey: any, setVaultItems: any) {
   const unlockVault = async (e: React.FormEvent) => {
     e.preventDefault();
     setUnlocking(true);
-    const tid = toast.loading('Unlocking vault...');
     try {
-      const salt = user?.vault_salt;
-      if (!salt) throw new Error('NO_SALT');
+      await toastService.withProgress(
+        'Unlocking vault...',
+        async (update) => {
+          const salt = user?.vault_salt;
+          if (!salt) throw new Error('NO_SALT');
 
-      const key = await deriveKey(masterPassword, salt);
+          const key = await deriveKey(masterPassword, salt);
 
-      // Verify the master password is correct before accepting it.
-      // Fetch one item and try to decrypt it — if it fails the password is wrong.
-      toast.loading('Verifying master password...', { id: tid });
-      const { data: items } = await vaultApi.list();
+          // Verify the master password is correct before accepting it.
+          // Fetch one item and try to decrypt it — if it fails the password is wrong.
+          update('Verifying master password...');
+          const { data: items } = await vaultApi.list();
 
-      if (items.length > 0) {
-        try {
-          const { data: firstItem } = await vaultApi.get(items[0].id);
-          await decryptData(firstItem.encrypted_data, key);
-        } catch (verifyErr) {
-          console.error('[unlock] Key verification failed:', verifyErr);
-          throw new Error('WRONG_PASSWORD');
-        }
-      }
+          if (items.length > 0) {
+            try {
+              const { data: firstItem } = await vaultApi.get(items[0].id);
+              await decryptData(firstItem.encrypted_data, key);
+            } catch (verifyErr) {
+              console.error('[unlock] Key verification failed:', verifyErr);
+              throw new Error('WRONG_PASSWORD');
+            }
+          }
 
-      // Key verified — commit to store and load all items
-      setVaultKey(key);
-      toast.loading('Loading items...', { id: tid });
-      setVaultItems(items);
-      setMasterPassword('');
-      toast.success('Vault unlocked', { id: tid });
-    } catch (err: any) {
-      if (err?.message === 'WRONG_PASSWORD') {
-        toast.error('Wrong master password', { id: tid });
-      } else if (err?.message === 'NO_SALT') {
-        toast.error('Session error — please sign out and sign in again', { id: tid });
-      } else {
-        toast.error('Failed to unlock vault', { id: tid });
-      }
-      console.error('[unlock] Error:', err);
+          // Key verified — commit to store and load all items
+          setVaultKey(key);
+          update('Loading items...');
+          setVaultItems(items);
+          setMasterPassword('');
+        },
+        'Vault unlocked',
+        {
+          getError: (err: any) => {
+            if (err?.message === 'WRONG_PASSWORD') return 'Wrong master password';
+            if (err?.message === 'NO_SALT') return 'Session error — please sign out and sign in again';
+            console.error('[unlock] Error:', err);
+            return 'Failed to unlock vault';
+          },
+        },
+      );
     } finally {
       setUnlocking(false);
     }
@@ -195,7 +182,7 @@ export default function Dashboard() {
       }
     } catch (err: any) {
       console.error('[handleSelectItem] Failed for item', item.id, err);
-      toast.error(getItemLoadError(err));
+      toastService.error(getItemLoadError(err));
       // Allow retry on failure
       decryptingItemIds.current.delete(item.id);
     } finally {
@@ -255,7 +242,7 @@ export default function Dashboard() {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       idleTimerRef.current = setTimeout(() => {
         lockVault();
-        toast('Vault auto-locked after 5 min of inactivity', { icon: '\uD83D\uDD12' });
+        toastService.notify('Vault auto-locked after 5 min of inactivity', { icon: '\uD83D\uDD12' });
       }, IDLE_MS);
     };
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'] as const;
@@ -293,21 +280,25 @@ export default function Dashboard() {
     e.preventDefault();
     if (!cryptoKey) return;
     if (newItem.category === 'login' && newItem.url && !/^https?:\/\//i.exec(newItem.url)) {
-      toast.error('URL must start with http:// or https://');
+      toastService.error('URL must start with http:// or https://');
       return;
     }
     setSavingItem(true);
-    const tid = toast.loading('Saving to vault...');
     try {
-      const { payload, encrypted_data } = await buildEncryptedPayload(newItem);
-      const favicon_url = newItem.url ? tryGetFaviconUrl(newItem.url) : undefined;
-      const { data } = await vaultApi.create({ name: newItem.name, category: newItem.category, encrypted_data, favicon_url });
-      addVaultItem({ ...data, decrypted: payload });
-      setShowAddModal(false);
-      setNewItem(emptyForm);
-      toast.success('Item added to vault', { id: tid });
-    } catch (err) { toast.error(parseApiError(err, 'Failed to save item'), { id: tid }); }
-    finally { setSavingItem(false); }
+      await toastService.withProgress(
+        'Saving to vault...',
+        async () => {
+          const { payload, encrypted_data } = await buildEncryptedPayload(newItem);
+          const favicon_url = newItem.url ? tryGetFaviconUrl(newItem.url) : undefined;
+          const { data } = await vaultApi.create({ name: newItem.name, category: newItem.category, encrypted_data, favicon_url });
+          addVaultItem({ ...data, decrypted: payload });
+          setShowAddModal(false);
+          setNewItem(emptyForm);
+        },
+        'Item added to vault',
+        { fallbackError: 'Failed to save item' },
+      );
+    } finally { setSavingItem(false); }
   };
 
   const handleOpenEdit = useCallback((item: VaultItem) => {
@@ -326,36 +317,44 @@ export default function Dashboard() {
     e.preventDefault();
     if (!cryptoKey || !editForm || !selectedItem) return;
     if (editForm.category === 'login' && editForm.url && !/^https?:\/\//i.exec(editForm.url)) {
-      toast.error('URL must start with http:// or https://');
+      toastService.error('URL must start with http:// or https://');
       return;
     }
     setUpdatingItem(true);
-    const tid = toast.loading('Updating item...');
     try {
-      const { payload, encrypted_data } = await buildEncryptedPayload(editForm);
-      const favicon_url = editForm.url ? tryGetFaviconUrl(editForm.url) ?? selectedItem.favicon_url : selectedItem.favicon_url;
-      const { data } = await vaultApi.update(selectedItem.id, { name: editForm.name, category: editForm.category, encrypted_data, favicon_url });
-      const updated = { ...data, decrypted: payload };
-      updateVaultItem(selectedItem.id, updated);
-      setSelectedItem(updated);
-      setShowEditModal(false);
-      setEditForm(null);
-      toast.success('Item updated', { id: tid });
-    } catch (err) { toast.error(parseApiError(err, 'Failed to update item'), { id: tid }); }
-    finally { setUpdatingItem(false); }
+      await toastService.withProgress(
+        'Updating item...',
+        async () => {
+          const { payload, encrypted_data } = await buildEncryptedPayload(editForm);
+          const favicon_url = editForm.url ? tryGetFaviconUrl(editForm.url) ?? selectedItem.favicon_url : selectedItem.favicon_url;
+          const { data } = await vaultApi.update(selectedItem.id, { name: editForm.name, category: editForm.category, encrypted_data, favicon_url });
+          const updated = { ...data, decrypted: payload };
+          updateVaultItem(selectedItem.id, updated);
+          setSelectedItem(updated);
+          setShowEditModal(false);
+          setEditForm(null);
+        },
+        'Item updated',
+        { fallbackError: 'Failed to update item' },
+      );
+    } finally { setUpdatingItem(false); }
   };
 
   const handleDelete = async (id: string) => {
     if (deletingId) return;
     setDeletingId(id);
-    const tid = toast.loading('Deleting item...');
     try {
-      await vaultApi.delete(id);
-      removeVaultItem(id);
-      if (selectedItem?.id === id) setSelectedItem(null);
-      toast.success('Item deleted', { id: tid });
-    } catch (err) { toast.error(parseApiError(err, 'Failed to delete'), { id: tid }); }
-    finally { setDeletingId(null); }
+      await toastService.withProgress(
+        'Deleting item...',
+        async () => {
+          await vaultApi.delete(id);
+          removeVaultItem(id);
+          if (selectedItem?.id === id) setSelectedItem(null);
+        },
+        'Item deleted',
+        { fallbackError: 'Failed to delete' },
+      );
+    } finally { setDeletingId(null); }
   };
 
   const handleToggleFav = async (item: VaultItem) => {
@@ -369,19 +368,23 @@ export default function Dashboard() {
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
-    toast.success(`${label} copied!`);
+    toastService.success(`${label} copied!`);
     setTimeout(() => navigator.clipboard.writeText(''), 30000);
   };
 
   const handleExport = async () => {
-    try {
-      const { data } = await vaultApi.export();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'cipheria-export.json'; a.click();
-      toast.success('Vault exported');
-    } catch { toast.error('Export failed'); }
+    await toastService.withProgress(
+      'Exporting vault...',
+      async () => {
+        const { data } = await vaultApi.export();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'cipheria-export.json'; a.click();
+      },
+      'Vault exported',
+      { fallbackError: 'Export failed' },
+    );
   };
 
   const filteredItems = useMemo(
