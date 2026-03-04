@@ -73,6 +73,7 @@ const buildPayload = (form: typeof emptyForm) => {
 function useVaultUnlock(user: any, setVaultKey: any, setVaultItems: any) {
   const [masterPassword, setMasterPassword] = useState('');
   const [unlocking, setUnlocking] = useState(false);
+  const [signout, setSignout] = useState(false);
 
   const unlockVault = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,7 +123,7 @@ function useVaultUnlock(user: any, setVaultKey: any, setVaultItems: any) {
     }
   };
 
-  return { masterPassword, setMasterPassword, unlocking, unlockVault };
+  return { masterPassword, setMasterPassword, unlocking, signout, setSignout, unlockVault };
 }
 
 export default function Dashboard() {
@@ -150,7 +151,7 @@ export default function Dashboard() {
   const currentSelectionRef = useRef<string | null>(null); // prevent overwrite on nav away
   const [hibp, setHibp] = useState<{ checking: boolean; count: number | null }>({ checking: false, count: null });
 
-  const { masterPassword, setMasterPassword, unlocking, unlockVault } = useVaultUnlock(user, setVaultKey, setVaultItems);
+  const { masterPassword, setMasterPassword, unlocking, signout, setSignout, unlockVault } = useVaultUnlock(user, setVaultKey, setVaultItems);
 
   // Fetch full item (with encrypted_data) on demand and decrypt client-side.
   // Reads cryptoKey from the store directly (not from closure) to always have the latest key.
@@ -397,7 +398,7 @@ export default function Dashboard() {
   );
 
   if (isVaultLocked) {
-    return <LockedVaultScreen user={user} masterPassword={masterPassword} setMasterPassword={setMasterPassword} unlocking={unlocking} unlockVault={unlockVault} handleLogout={handleLogout} />;
+    return <LockedVaultScreen user={user} masterPassword={masterPassword} setMasterPassword={setMasterPassword} unlocking={unlocking} signout={signout} setSignout={setSignout} unlockVault={unlockVault} handleLogout={handleLogout} />;
   }
 
   if (sessionLoading) {
@@ -411,7 +412,16 @@ export default function Dashboard() {
   return <MainDashboard user={user} category={category} setCategory={setCategory} searchValue={search} onSearchChange={handleSearchChange} handleExport={handleExport} lockVault={lockVault} handleLogout={handleLogout} vaultItems={vaultItems} selectedItem={selectedItem} handleSelectItem={handleSelectItem} selectedItemLoading={selectedItemLoading} handleToggleFav={handleToggleFav} handleOpenEdit={handleOpenEdit} handleDelete={handleDelete} deletingId={deletingId} copyToClipboard={copyToClipboard} hibp={hibp} setHibp={setHibp} showAddModal={showAddModal} setShowAddModal={setShowAddModal} newItem={newItem} setNewItem={setNewItem} savingItem={savingItem} genOptions={genOptions} handleAddItem={handleAddItem} showEditModal={showEditModal} setShowEditModal={setShowEditModal} editForm={editForm} setEditForm={setEditForm} updatingItem={updatingItem} handleEditItem={handleEditItem} filteredItems={filteredItems} />;
 }
 
-function LockedVaultScreen({ user, masterPassword, setMasterPassword, unlocking, unlockVault, handleLogout }: Readonly<any>) {
+function LockedVaultScreen({ user, masterPassword, setMasterPassword, unlocking, signout, setSignout, unlockVault, handleLogout }: Readonly<any>) {
+  const handleSignout = async () => {
+    setSignout(true);
+    try {
+      await handleLogout();
+    } finally {
+      setSignout(false);
+    }
+  };
+
   return (
     <div
       style={{
@@ -484,11 +494,12 @@ function LockedVaultScreen({ user, masterPassword, setMasterPassword, unlocking,
           </button>
         </form>
         <button
-          onClick={handleLogout}
+          onClick={handleSignout}
           className="btn-ghost"
-          style={{ width: '100%', marginTop: 12, minHeight: 44 }}
+          disabled={signout}
+          style={{ width: '100%', marginTop: 12, minHeight: 44, opacity: signout ? 0.7 : 1, color: 'var(--danger)' }}
         >
-          Sign out
+          {signout ? 'Signing out...' : 'Sign out'}
         </button>
       </div>
     </div>
