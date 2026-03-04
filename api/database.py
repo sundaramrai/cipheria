@@ -1,103 +1,117 @@
-﻿import os
-import re
-import uuid
-import logging
-from datetime import datetime, timezone
-from typing import Generator
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, Column, String, Boolean, Integer, Index, text
+﻿"""
+database.py — Sync SQLAlchemy with PostgreSQL
+"""
+
+from sqlalchemy import create_engine, Column, String, Text, Boolean, Integer, Index, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
 from sqlalchemy.types import TIMESTAMP
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.pool import NullPool
+from datetime import datetime, timezone
+from typing import Generator
+import logging
+import uuid
+import os
+import re
+import ssl
+import certifi
+from dotenv import load_dotenv
 
-load_dotenv()
 logger = logging.getLogger(__name__)
+load_dotenv()
 
-# constants
-DEFAULT_ID_GENERATOR = "gen_random_uuid()"
-DEFAULT_TIMESTAMP = "now()"
 
-# build database url
-def build_database_url() -> str:
+def _build_database_url() -> str:
     url = os.getenv("DATABASE_URL", "")
-    if not url:
-        raise RuntimeError("DATABASE_URL not set")
-    url = re.sub(r'^postgres(ql)?://', 'postgresql+psycopg://', url)
-    if "neon.tech" in url and "sslmode" not in url:
-        url += ("&" if "?" in url else "?") + "sslmode=require"
-    return url
+    return re.sub(r'^postgres(ql)?://', 'postgresql+psycopg://', url)
 
-DATABASE_URL = build_database_url()
 
-# engine
+def _build_ssl_context():
+    if "neon.tech" not in os.getenv("DATABASE_URL", ""):
+        return None
+
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    ctx.check_hostname = True
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+
+_ssl_ctx = _build_ssl_context()
+
 engine = create_engine(
-    DATABASE_URL,
-    poolclass=NullPool, # serverless safe
-    pool_pre_ping=True, # detect dead connections
-    execution_options={"compiled_cache_size": 500}, # query cache
-    echo=False
+    _build_database_url(),
+    connect_args={"sslmode": "require"} if _ssl_ctx else {},
+    poolclass=NullPool,
+    echo=False,
 )
 
-# session
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, expire_on_commit=False)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
 
-# base
+# Base class for models
 class Base(DeclarativeBase):
     pass
 
-# user model
+# Models
+
 class User(Base):
     __tablename__ = "users"
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text(DEFAULT_ID_GENERATOR))
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(255), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
-    full_name = Column(String(255))
+    full_name = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text(DEFAULT_TIMESTAMP))
-    updated_at = Column(TIMESTAMP(timezone=True), server_default=text(DEFAULT_TIMESTAMP), onupdate=datetime.now(timezone.utc))
-    master_hint = Column(String(255))
+    created_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    # Master password hint (never the actual password)
+    master_hint = Column(String(255), nullable=True)
+    # Salt for client-side key derivation
     vault_salt = Column(String(64), nullable=False, default=lambda: uuid.uuid4().hex + uuid.uuid4().hex)
 
-# vault item model
+
 class VaultItem(Base):
     __tablename__ = "vault_items"
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text(DEFAULT_ID_GENERATOR))
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    name = Column(String(255), nullable=False)
-    category = Column(String(64), default="login")
-    encrypted_data = Column(JSONB, nullable=False) # encrypted JSON blob
-    favicon_url = Column(String(512))
+    name = Column(String(255), nullable=False)           # site/app name (plaintext for search)
+    category = Column(String(64), default="login")       # login, card, note, identity
+    # All sensitive fields are AES-256-GCM encrypted client-side before storage
+    encrypted_data = Column(Text, nullable=False)        # JSON blob: {username, password, url, notes, ...}
+    favicon_url = Column(String(512), nullable=True)
     is_favourite = Column(Boolean, default=False)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text(DEFAULT_TIMESTAMP))
-    updated_at = Column(TIMESTAMP(timezone=True), server_default=text(DEFAULT_TIMESTAMP), onupdate=datetime.now(timezone.utc))
+    created_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
     __table_args__ = (
-        Index("ix_vault_items_user_updated_desc","user_id",text("updated_at DESC")), # fast vault loading
-        Index("ix_vault_items_user_category","user_id","category"), # category filter
-        Index("ix_vault_items_user_favourite","user_id","is_favourite") # favourites
+        # Covers: WHERE user_id = ? ORDER BY updated_at DESC
+        Index('ix_vault_items_user_updated', 'user_id', 'updated_at'),
     )
 
-# audit log
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     action = Column(String(64), nullable=False)
-    ip_address = Column(String(64))
-    user_agent = Column(String(512))
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text(DEFAULT_TIMESTAMP))
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-# refresh token
+
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text(DEFAULT_ID_GENERATOR))
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     token_hash = Column(String(255), nullable=False, unique=True)
     expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
     revoked = Column(Boolean, default=False)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text(DEFAULT_TIMESTAMP))
 
-# dependency
+
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
@@ -105,21 +119,21 @@ def get_db() -> Generator[Session, None, None]:
     finally:
         db.close()
 
-# create tables and indexes
+
 def create_tables():
     Base.metadata.create_all(bind=engine)
+    # pg_trgm powers fast ILIKE '%term%' via GIN index
+    # Only runs in development; run the SQL below manually on Neon prod:
+    #   CREATE EXTENSION IF NOT EXISTS pg_trgm;
+    #   CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_vault_items_name_trgm
+    #     ON vault_items USING gin (name gin_trgm_ops);
     try:
         with engine.connect() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm")) # search extension
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto")) # uuid generator
-            conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS ix_vault_items_name_trgm
-                ON vault_items USING gin (name gin_trgm_ops)
-            """))
-            conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS ix_vault_items_fav_partial
-                ON vault_items (user_id) WHERE is_favourite = true
-            """))
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_vault_items_name_trgm "
+                "ON vault_items USING gin (name gin_trgm_ops)"
+            ))
             conn.commit()
     except Exception as e:
-        logger.warning(f"Index creation failed: {e}")
+        print(f"Warning: Could not create pg_trgm index: {e}")
