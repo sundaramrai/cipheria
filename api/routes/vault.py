@@ -4,12 +4,14 @@ from typing import Annotated, Optional
 from uuid import UUID
 
 from database import get_db, VaultItem
-from schemas import VaultItemCreate, VaultItemUpdate, VaultItemResponse, VaultItemSummary
+from schemas import VaultItemCreate, VaultItemUpdate, VaultItemResponse, VaultItemSummary, PaginatedVaultResponse
 from deps import CurrentUser, DBUser
 
 router = APIRouter(prefix="/vault", tags=["vault"])
 
 ITEM_NOT_FOUND_MSG = "Item not found"
+MAX_PAGE_SIZE = 100
+
 
 # export encrypted vault data
 @router.get("/export/json")
@@ -18,7 +20,6 @@ def export_vault(
     current_user: DBUser,
 ):
     items = db.query(VaultItem).filter(VaultItem.user_id == current_user.id).all()
-    
     return {
         "export_version": "1.0",
         "user_email": current_user.email,
@@ -37,14 +38,17 @@ def export_vault(
         ],
     }
 
-# list vault items — metadata only (no encrypted_data) for fast load
-@router.get("", response_model=list[VaultItemSummary])
+
+# list vault items — metadata only, paginated
+@router.get("", response_model=PaginatedVaultResponse)
 def list_items(
     db: Annotated[Session, Depends(get_db)],
     current_user: CurrentUser,
     category: Annotated[Optional[str], Query()] = None,
     search: Annotated[Optional[str], Query(max_length=128)] = None,
     favourites_only: Annotated[bool, Query()] = False,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 50,
 ):
     q = db.query(
         VaultItem.id,
@@ -59,14 +63,23 @@ def list_items(
     if category:
         q = q.filter(VaultItem.category == category)
     if search:
-        # Uses gin_trgm index when pg_trgm extension is enabled
         q = q.filter(VaultItem.name.ilike(f"%{search}%"))
     if favourites_only:
         q = q.filter(VaultItem.is_favourite.is_(True))
 
-    return q.order_by(VaultItem.updated_at.desc()).all()
+    total = q.count()
+    items = q.order_by(VaultItem.updated_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
 
-# get single vault item with encrypted_data (called on item select)
+    return PaginatedVaultResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=-(-total // page_size),  # ceiling division
+    )
+
+
+# get single vault item with encrypted_data
 @router.get("/{item_id}", response_model=VaultItemResponse, responses={404: {"description": ITEM_NOT_FOUND_MSG}})
 def get_item(
     item_id: UUID,
@@ -80,6 +93,7 @@ def get_item(
     if not item:
         raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
     return item
+
 
 # create vault item
 @router.post("", response_model=VaultItemResponse, status_code=201)
@@ -100,6 +114,7 @@ def create_item(
     db.commit()
     return item
 
+
 # update vault item
 @router.patch("/{item_id}", response_model=VaultItemResponse, responses={404: {"description": ITEM_NOT_FOUND_MSG}})
 def update_item(
@@ -115,12 +130,12 @@ def update_item(
     if not item:
         raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
 
-    update_data = body.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(item, field, value)
 
     db.commit()
     return item
+
 
 # delete vault item
 @router.delete("/{item_id}", status_code=204, responses={404: {"description": ITEM_NOT_FOUND_MSG}})
