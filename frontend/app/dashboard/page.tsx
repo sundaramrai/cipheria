@@ -90,7 +90,7 @@ function useVaultUnlock(user: any, setVaultKey: any, setVaultItems: any, setTota
           // Verify the master password is correct before accepting it.
           // Fetch one item and try to decrypt it — if it fails the password is wrong.
           update('Verifying master password...');
-          const { data: listResult } = await vaultApi.list({ page_size: 100 });
+          const { data: listResult } = await vaultApi.list({ page_size: 50 });
           const items = listResult.items;
 
           if (items.length > 0) {
@@ -403,7 +403,7 @@ export default function Dashboard() {
 
   const handlePageChange = useCallback(async (newPage: number) => {
     try {
-      const { data } = await vaultApi.list({ page: newPage, page_size: 100 });
+      const { data } = await vaultApi.list({ page: newPage, page_size: 50 });
       setVaultItems(data.items);
       setPage(newPage);
       setTotalPages(data.total_pages ?? 1);
