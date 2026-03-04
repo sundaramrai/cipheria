@@ -2,7 +2,8 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Key, Eye, EyeOff, AlertCircle } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { toastService } from '@/lib/toast';
+import { parseApiError } from '@/lib/errors';
 import { authApi, setAccessToken } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
 import { passwordStrength } from '@/lib/crypto';
@@ -41,18 +42,17 @@ function AuthPageContent() {
         setAccessToken(data.access_token);
         const { data: user } = await authApi.me();
         setAuth(user, data.access_token);
-        toast.success('Account created! Set your master password to unlock the vault.');
+        toastService.success('Account created! Set your master password to unlock the vault.');
       } else {
         const { data } = await authApi.login(form.email, form.password);
         setAccessToken(data.access_token);
         const { data: user } = await authApi.me();
         setAuth(user, data.access_token);
-        toast.success('Welcome back!');
+        toastService.success('Welcome back!');
       }
       router.push('/dashboard');
     } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Something went wrong';
-      toast.error(msg);
+      toastService.error(parseApiError(err, 'Something went wrong'));
     } finally {
       setLoading(false);
     }
