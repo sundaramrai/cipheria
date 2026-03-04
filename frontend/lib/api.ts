@@ -9,6 +9,10 @@ let _accessToken: string | null = null;
 export const setAccessToken = (token: string | null) => { _accessToken = token; };
 export const getAccessToken = () => _accessToken;
 
+// Refresh mutex — ensures only one refresh call is in-flight at a time.
+// All concurrent 401 retries await the same promise and reuse the new token.
+let _refreshPromise: Promise<string> | null = null;
+
 export const api = axios.create({
   baseURL: API_URL,
   headers: { 'Content-Type': 'application/json' },
@@ -33,10 +37,19 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !original._retry && !isRefreshCall) {
       original._retry = true;
       try {
-        // Cookie is sent automatically via withCredentials
-        const { data } = await axios.post(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true });
-        setAccessToken(data.access_token);
-        original.headers.Authorization = `Bearer ${data.access_token}`;
+        // If a refresh is already in-flight, reuse that promise instead of
+        // firing a second one (which would hit a rotated/revoked token).
+        _refreshPromise ??= axios
+          .post(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true })
+          .then(({ data }) => {
+            setAccessToken(data.access_token);
+            return data.access_token as string;
+          })
+          .finally(() => {
+            _refreshPromise = null;
+          });
+        const newToken = await _refreshPromise;
+        original.headers.Authorization = `Bearer ${newToken}`;
         return api(original);
       } catch {
         // Refresh failed — clear token; callers handle redirect
