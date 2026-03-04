@@ -24,7 +24,6 @@ function AuthPageContent() {
       router.push('/dashboard');
       return;
     }
-    // If tokens exist from a previous session, restore and redirect
     restoreSession().then((ok) => {
       if (ok) router.push('/dashboard');
     });
@@ -68,20 +67,38 @@ function AuthPageContent() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--bg)' }}>
+    <main
+      className="min-h-screen flex items-center justify-center"
+      style={{
+        background: 'var(--bg)',
+        padding: 'clamp(16px, 5vw, 24px)',
+        /* On very small screens, allow content to start near top rather than centering off-screen */
+        alignItems: 'flex-start',
+      }}
+    >
+      {/* Offset alignment fix: re-center on larger screens */}
+      <style>{`
+        @media (min-height: 640px) {
+          main { align-items: center !important; }
+        }
+      `}</style>
+
       {/* Background glow */}
       <div style={{
         position: 'fixed', top: '30%', left: '50%', transform: 'translateX(-50%)',
-        width: 600, height: 600, borderRadius: '50%',
+        width: 'min(600px, 100vw)', height: 'min(600px, 100vw)', borderRadius: '50%',
         background: 'radial-gradient(ellipse, rgba(245,158,11,0.08) 0%, transparent 70%)',
         pointerEvents: 'none',
       }} />
 
-      <div className="animate-fade-up" style={{ width: '100%', maxWidth: 440, position: 'relative', zIndex: 1 }}>
+      <div
+        className="animate-fade-up"
+        style={{ width: '100%', maxWidth: 440, position: 'relative', zIndex: 1, margin: '0 auto' }}
+      >
         {/* Logo */}
-        <div className="flex items-center gap-3 justify-center mb-10">
+        <div className="flex items-center gap-3 justify-center" style={{ marginBottom: 'clamp(24px, 6vw, 40px)' }}>
           <div style={{
-            width: 44, height: 44, borderRadius: 10,
+            width: 44, height: 44, borderRadius: 10, flexShrink: 0,
             background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
             <Key size={22} color="#0a0908" strokeWidth={2.5} />
@@ -90,26 +107,28 @@ function AuthPageContent() {
         </div>
 
         {/* Card */}
-        <div className="glass" style={{ borderRadius: 20, padding: 40 }}>
+        <div className="glass" style={{ borderRadius: 20, padding: 'clamp(24px, 6vw, 40px)' }}>
           {/* Tabs */}
           <div style={{
-            display: 'flex', gap: 0, marginBottom: 32,
+            display: 'flex', gap: 0, marginBottom: 'clamp(20px, 5vw, 32px)',
             background: 'rgba(0,0,0,0.3)', borderRadius: 10, padding: 4,
           }}>
             {(['login', 'register'] as const).map((t) => (
               <button key={t} onClick={() => setTab(t)} style={{
-                flex: 1, padding: '10px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                flex: 1, padding: 'clamp(8px, 2vw, 10px)', borderRadius: 8, border: 'none', cursor: 'pointer',
                 background: tab === t ? 'var(--accent)' : 'transparent',
                 color: tab === t ? '#0a0908' : 'var(--text-secondary)',
-                fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.875rem',
+                fontFamily: 'Outfit, sans-serif', fontWeight: 600,
+                fontSize: 'clamp(0.78rem, 2.5vw, 0.875rem)',
                 transition: 'all 0.2s', textTransform: 'capitalize',
+                whiteSpace: 'nowrap',
               }}>
                 {t === 'login' ? 'Sign In' : 'Create Account'}
               </button>
             ))}
           </div>
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'clamp(14px, 3vw, 18px)' }}>
             {tab === 'register' && (
               <div>
                 <label htmlFor="fullName" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 8, letterSpacing: '0.04em' }}>
@@ -138,6 +157,8 @@ function AuthPageContent() {
                 required
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
+                /* Prevent iOS zoom on focus (font-size >= 16px) */
+                style={{ fontSize: 'max(16px, 0.9rem)' }}
               />
             </div>
 
@@ -154,12 +175,18 @@ function AuthPageContent() {
                   required
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  style={{ paddingRight: 44 }}
+                  style={{ paddingRight: 44, fontSize: 'max(16px, 0.9rem)' }}
                 />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} style={{
-                  position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)',
-                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)',
-                }}>
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  /* Larger tap target for mobile */
+                  style={{
+                    position: 'absolute', right: 0, top: 0, bottom: 0,
+                    width: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)',
+                  }}
+                >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
@@ -192,8 +219,13 @@ function AuthPageContent() {
                   placeholder="A hint to remember your master password"
                   value={form.masterHint}
                   onChange={(e) => setForm({ ...form, masterHint: e.target.value })}
+                  style={{ fontSize: 'max(16px, 0.9rem)' }}
                 />
-                <div style={{ display: 'flex', gap: 8, marginTop: 10, padding: '10px 12px', borderRadius: 8, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)' }}>
+                <div style={{
+                  display: 'flex', gap: 8, marginTop: 10,
+                  padding: 'clamp(8px, 2vw, 10px) 12px',
+                  borderRadius: 8, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)',
+                }}>
                   <AlertCircle size={14} color="var(--accent)" style={{ flexShrink: 0, marginTop: 2 }} />
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                     Your master password derives the encryption key. If you forget it, <strong style={{ color: 'var(--text-primary)' }}>your vault cannot be recovered</strong>.
@@ -206,17 +238,24 @@ function AuthPageContent() {
               type="submit"
               className="btn-primary"
               disabled={loading}
-              style={{ marginTop: 8, opacity: loading ? 0.7 : 1, cursor: loading ? 'not-allowed' : 'pointer' }}
+              style={{
+                marginTop: 8, opacity: loading ? 0.7 : 1,
+                cursor: loading ? 'not-allowed' : 'pointer',
+                /* Comfortable tap target on mobile */
+                minHeight: 48,
+              }}
             >
               {buttonLabel}
             </button>
           </form>
         </div>
 
-        <p style={{ textAlign: 'center', marginTop: 20, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+        <p style={{ textAlign: 'center', marginTop: 20, fontSize: '0.8rem', color: 'var(--text-secondary)', paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}>
           {tab === 'login' ? "Don't have an account? " : 'Already have an account? '}
-          <button onClick={() => setTab(tab === 'login' ? 'register' : 'login')}
-            style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.8rem' }}>
+          <button
+            onClick={() => setTab(tab === 'login' ? 'register' : 'login')}
+            style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.8rem', padding: '4px 2px' }}
+          >
             {tab === 'login' ? 'Create one' : 'Sign in'}
           </button>
         </p>
