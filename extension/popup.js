@@ -3,7 +3,9 @@
  * Uses the Web Crypto API for AES-256-GCM encryption (same as the web app).
  */
 
-const URL = 'https://cipheria.vercel.app'; // ← Production API and web app URL (also used for opening the web app from the extension)
+// Switch to 'http://localhost:8000' for local development, or the production URL when deployed.
+const IS_DEV = false; // ← Set to true when testing locally
+const URL = IS_DEV ? 'http://localhost:8000' : 'https://cipheria.vercel.app';
 const PBKDF2_ITERATIONS = 600_000;
 
 let cryptoKey = null;
@@ -285,64 +287,203 @@ function renderList() {
     (item.decrypted?.url || '').toLowerCase().includes(search)
   );
 
+  // Clear existing content safely
+  while (list.firstChild) list.firstChild.remove();
+
   if (filtered.length === 0) {
-    list.innerHTML = `<div class="empty"><svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" opacity="0.4"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><p style="font-size:12px;">No items found</p></div>`;
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '32');
+    svg.setAttribute('height', '32');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.5');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('opacity', '0.4');
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('width', '18'); rect.setAttribute('height', '11');
+    rect.setAttribute('x', '3'); rect.setAttribute('y', '11'); rect.setAttribute('rx', '2');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M7 11V7a5 5 0 0 1 10 0v4');
+    svg.appendChild(rect); svg.appendChild(path);
+
+    const p = document.createElement('p');
+    p.style.fontSize = '12px';
+    p.textContent = 'No items found';
+
+    empty.appendChild(svg);
+    empty.appendChild(p);
+    list.appendChild(empty);
     return;
   }
 
-  list.innerHTML = filtered.map(item => `
-    <div class="item" data-id="${item.id}">
-      <div class="item-icon">
-        ${item.favicon_url
-      ? `<img src="${item.favicon_url}" width="18" height="18" data-fallback="1" />`
-      : getCategoryLabel(item.category)}
-      </div>
-      <div class="item-info">
-        <div class="item-name">${escHtml(item.name)}</div>
-        <div class="item-sub">${escHtml(item.decrypted?.username || item.decrypted?.url || item.category)}</div>
-      </div>
-      ${item.is_favourite ? '<svg width="11" height="11" fill="var(--accent)" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>' : ''}
-    </div>
-  `).join('');
+  filtered.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.dataset.id = item.id;
+
+    // Icon
+    const iconDiv = document.createElement('div');
+    iconDiv.className = 'item-icon';
+    if (item.favicon_url) {
+      const img = document.createElement('img');
+      img.src = item.favicon_url;
+      img.width = 18;
+      img.height = 18;
+      img.dataset.fallback = '1';
+      iconDiv.appendChild(img);
+    } else {
+      iconDiv.textContent = getCategoryLabel(item.category);
+    }
+
+    // Info
+    const infoDiv = document.createElement('div');
+    infoDiv.className = 'item-info';
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'item-name';
+    nameDiv.textContent = item.name;
+    const subDiv = document.createElement('div');
+    subDiv.className = 'item-sub';
+    subDiv.textContent = item.decrypted?.username || item.decrypted?.url || item.category;
+    infoDiv.appendChild(nameDiv);
+    infoDiv.appendChild(subDiv);
+
+    div.appendChild(iconDiv);
+    div.appendChild(infoDiv);
+
+    // Favourite star
+    if (item.is_favourite) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('width', '11'); svg.setAttribute('height', '11');
+      svg.setAttribute('fill', 'var(--accent)'); svg.setAttribute('viewBox', '0 0 24 24');
+      const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      poly.setAttribute('points', '12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2');
+      svg.appendChild(poly);
+      div.appendChild(svg);
+    }
+
+    list.appendChild(div);
+  });
 }
 
-function showDetail(id) {
+async function showDetail(id) {
   currentItem = vaultItems.find(i => i.id === id);
   if (!currentItem) return;
 
+  // Show screen immediately with a loading state
   document.getElementById('detail-title').textContent = currentItem.name;
-  const dec = currentItem.decrypted || {};
+  const container = document.getElementById('detail-content');
+  while (container.firstChild) container.firstChild.remove();
+  const loadingEl = document.createElement('p');
+  loadingEl.style.cssText = 'font-size:12px;color:var(--text-secondary);text-align:center;padding:16px 0;';
+  loadingEl.textContent = 'Loading...';
+  container.appendChild(loadingEl);
+  showScreen('screen-detail');
 
-  let html = '';
-  if (dec.url) html += fieldHtml('URL', dec.url, 'url');
-  if (dec.username) html += fieldHtml('Username / Email', dec.username, 'text');
-  if (dec.password) html += fieldHtml('Password', dec.password, 'password');
-  if (dec.notes) html += `<div class="field"><div class="field-label">Notes</div><div class="field-value" style="white-space:pre-wrap;font-size:12px;">${escHtml(dec.notes)}</div></div>`;
-
-  if (dec.url && dec.username && dec.password) {
-    html += `<button class="btn btn-primary w-full" id="btn-autofill" style="margin-top:8px;">Autofill on Page</button>`;
+  // Fetch full item (includes encrypted_data) then decrypt
+  try {
+    const token = await getValidToken();
+    const res = await fetch(`${URL}/api/vault/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`Failed to load item (${res.status})`);
+    const fullItem = await res.json();
+    const decrypted = await decryptData(fullItem.encrypted_data, cryptoKey);
+    currentItem = { ...currentItem, ...fullItem, decrypted };
+    // Update cached entry so subsequent opens are consistent
+    const idx = vaultItems.findIndex(i => i.id === id);
+    if (idx !== -1) vaultItems[idx] = currentItem;
+  } catch (err) {
+    console.error('Failed to load item detail:', err);
+    while (container.firstChild) container.firstChild.remove();
+    const errEl = document.createElement('p');
+    errEl.style.cssText = 'font-size:12px;color:var(--danger,#e05);text-align:center;padding:16px 0;';
+    errEl.textContent = 'Failed to load item.';
+    container.appendChild(errEl);
+    return;
   }
 
-  document.getElementById('detail-content').innerHTML = html;
-  // Wire autofill button if it was rendered (no inline onclick allowed by CSP)
-  const autofillBtn = document.getElementById('btn-autofill');
-  if (autofillBtn) autofillBtn.addEventListener('click', autofillItem);
+  const dec = currentItem.decrypted || {};
+  while (container.firstChild) container.firstChild.remove();
+
+  if (dec.url) container.appendChild(createField('URL', dec.url, 'url'));
+  if (dec.username) container.appendChild(createField('Username / Email', dec.username, 'text'));
+  if (dec.password) container.appendChild(createField('Password', dec.password, 'password'));
+
+  if (dec.notes) {
+    const field = document.createElement('div');
+    field.className = 'field';
+    const label = document.createElement('div');
+    label.className = 'field-label';
+    label.textContent = 'Notes';
+    const value = document.createElement('div');
+    value.className = 'field-value';
+    value.style.whiteSpace = 'pre-wrap';
+    value.style.fontSize = '12px';
+    value.textContent = dec.notes;
+    field.appendChild(label);
+    field.appendChild(value);
+    container.appendChild(field);
+  }
+
+  if (dec.url && dec.username && dec.password) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-primary w-full';
+    btn.style.marginTop = '8px';
+    btn.textContent = 'Autofill on Page';
+    btn.addEventListener('click', autofillItem);
+    container.appendChild(btn);
+  }
+
   showScreen('screen-detail');
 }
 
-function fieldHtml(label, value, type) {
+function createField(label, value, type) {
   const isPassword = type === 'password';
-  const displayVal = isPassword ? '••••••••••••' : escHtml(value);
-  const id = `field-${label.replaceAll(' ', '-')}`;
-  return `
-    <div class="field">
-      <div class="field-label">${label}</div>
-      <div class="field-value" id="${id}" data-val="${escHtml(value)}" data-shown="false">${displayVal}</div>
-      <div class="field-actions">
-        ${isPassword ? `<button class="btn btn-ghost" data-action="toggle" data-field-id="${id}" style="font-size:11px;padding:4px 8px;">Show</button>` : ''}
-        <button class="btn btn-ghost" data-action="copy" data-value="${escHtml(value)}" data-label="${label}" style="font-size:11px;padding:4px 8px;">Copy</button>
-      </div>
-    </div>`;
+  const fieldId = `field-${label.replaceAll(' ', '-')}`;
+
+  const field = document.createElement('div');
+  field.className = 'field';
+
+  const labelEl = document.createElement('div');
+  labelEl.className = 'field-label';
+  labelEl.textContent = label;
+
+  const valueEl = document.createElement('div');
+  valueEl.className = 'field-value';
+  valueEl.id = fieldId;
+  valueEl.dataset.val = value;
+  valueEl.dataset.shown = 'false';
+  valueEl.textContent = isPassword ? '••••••••••••' : value;
+
+  const actions = document.createElement('div');
+  actions.className = 'field-actions';
+
+  if (isPassword) {
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'btn btn-ghost';
+    toggleBtn.style.cssText = 'font-size:11px;padding:4px 8px;';
+    toggleBtn.dataset.action = 'toggle';
+    toggleBtn.dataset.fieldId = fieldId;
+    toggleBtn.textContent = 'Show';
+    actions.appendChild(toggleBtn);
+  }
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'btn btn-ghost';
+  copyBtn.style.cssText = 'font-size:11px;padding:4px 8px;';
+  copyBtn.dataset.action = 'copy';
+  copyBtn.dataset.value = value;
+  copyBtn.dataset.label = label;
+  copyBtn.textContent = 'Copy';
+  actions.appendChild(copyBtn);
+
+  field.appendChild(labelEl);
+  field.appendChild(valueEl);
+  field.appendChild(actions);
+  return field;
 }
 
 function toggleShow(id) {
@@ -423,6 +564,7 @@ function fillGenerated() {
   crypto.getRandomValues(arr);
   document.getElementById('add-password').value = Array.from(arr, x => chars[x % chars.length]).join('');
   // nosemgrep: javascript:S2068 - password is randomly generated, not hard-coded
+  // nosemgrep: javascript:S2068 - this is a DOM element ID, not a password string
   document.getElementById('add-password').type = 'text';
 }
 
