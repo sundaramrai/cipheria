@@ -16,7 +16,7 @@ from deps import get_current_user_from_db
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from index import limiter
+from limiter import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
