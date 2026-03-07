@@ -6,6 +6,7 @@ bcrypt==5.0.0
 python-multipart==0.0.22
 pydantic==2.12.5
 pydantic-settings==2.13.1
+email-validator==2.3.0
 cryptography==46.0.5
 python-dotenv==1.2.2
 certifi==2026.2.25
