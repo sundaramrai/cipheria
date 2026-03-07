@@ -13,7 +13,6 @@ def _validate_favicon_url(v: Optional[str]) -> Optional[str]:
 
 # Auth
 
-
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
@@ -53,7 +52,6 @@ class UserResponse(BaseModel):
 
 # Vault Items
 
-
 class VaultItemCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     category: str = Field(default="login", pattern="^(login|card|note|identity)$")
@@ -81,8 +79,7 @@ class VaultItemUpdate(BaseModel):
 
 
 class VaultItemSummary(BaseModel):
-    """Metadata-only response — no encrypted_data. Used by the list endpoint."""
-
+    # Metadata only — no encrypted_data, used by list endpoint
     id: UUID
     name: str
     category: str
@@ -96,8 +93,7 @@ class VaultItemSummary(BaseModel):
 
 
 class VaultItemResponse(BaseModel):
-    """Full response including encrypted_data. Used by create, update and detail endpoints."""
-
+    # Full response including encrypted_data, used by create/update/detail
     id: UUID
     name: str
     category: str
@@ -112,8 +108,6 @@ class VaultItemResponse(BaseModel):
 
 
 class PaginatedVaultResponse(BaseModel):
-    """Paginated wrapper for vault list endpoint."""
-
     items: List[VaultItemResponse]
     total: int
     page: int
