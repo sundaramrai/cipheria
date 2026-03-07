@@ -1,7 +1,3 @@
-"""
-api/index.py — FastAPI app entry point.
-"""
-
 import sys
 import os
 
@@ -10,6 +6,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -21,25 +18,19 @@ from routes.vault import router as vault_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Dev: auto-create tables
     if os.getenv("ENVIRONMENT", "production") == "development":
         from database import create_tables
-
         try:
             create_tables()
         except Exception as e:
             print(f"Warning: Could not create tables: {e}")
 
-    # Verify Redis connection on startup
     from cache import cache_ping, get_redis
-
     if get_redis():
         ok = cache_ping()
         print(f"Redis cache: {'connected' if ok else 'ping failed — degraded mode'}")
     else:
-        print(
-            "Redis cache: not configured (REDIS_URL missing) — all requests will hit DB"
-        )
+        print("Redis cache: not configured — all requests will hit DB")
 
     yield
 
@@ -54,12 +45,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Rate limiter setup
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
-# CORS — locked to specific origins via env var in production
+# Compress responses over 1KB
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 _allowed_origins = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 ]
@@ -77,7 +69,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routers
 app.include_router(auth_router, prefix="/api")
 app.include_router(vault_router, prefix="/api")
 
@@ -85,7 +76,6 @@ app.include_router(vault_router, prefix="/api")
 @app.get("/api/health")
 async def health():
     from cache import cache_ping, get_redis
-
     redis_ok = cache_ping() if get_redis() else None
     if redis_ok:
         cache_status = "connected"
@@ -93,8 +83,4 @@ async def health():
         cache_status = "disabled"
     else:
         cache_status = "degraded"
-    return {
-        "status": "ok",
-        "service": "cipheria-api",
-        "cache": cache_status,
-    }
+    return {"status": "ok", "service": "cipheria-api", "cache": cache_status}
