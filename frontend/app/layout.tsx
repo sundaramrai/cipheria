@@ -1,6 +1,29 @@
 import type { Metadata } from 'next';
+import { Cormorant_Garamond, DM_Mono, Outfit } from 'next/font/google';
 import '../styles/globals.css';
 import { Toaster } from 'react-hot-toast';
+
+const cormorant = Cormorant_Garamond({
+  subsets: ['latin'],
+  weight: ['400', '600'],
+  style: ['normal', 'italic'],
+  variable: '--font-display',
+  display: 'swap',
+});
+
+const dmMono = DM_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500'],
+  variable: '--font-mono',
+  display: 'swap',
+});
+
+const outfit = Outfit({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600'],
+  variable: '--font-body',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'Cipheria — Secure Password Manager',
@@ -13,13 +36,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { readonly children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={`${cormorant.variable} ${dmMono.variable} ${outfit.variable}`}>
       <body suppressHydrationWarning>
         <div style={{ position: 'relative', zIndex: 1 }}>
           {children}
         </div>
         <Toaster
           position="bottom-right"
+          containerStyle={{ zIndex: 9999 }}
           toastOptions={{
             style: {
               background: '#19170f',
