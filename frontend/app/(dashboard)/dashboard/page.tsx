@@ -108,6 +108,7 @@ export default function Dashboard() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedItemLoading, setSelectedItemLoading] = useState(false);
   const [searchResults, setSearchResults] = useState<VaultItem[] | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [hibp, setHibp] = useState<{ checking: boolean; count: number | null }>({ checking: false, count: null });
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -193,8 +194,9 @@ export default function Dashboard() {
     setSearch(val);
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchAbortRef.current?.abort();
-    if (!val) { setSearchResults(null); setPage(1); return; }
+    if (!val) { setSearchResults(null); setSearchLoading(false); setPage(1); return; }
     searchDebounceRef.current = setTimeout(async () => {
+      setSearchLoading(true);
       const controller = new AbortController();
       searchAbortRef.current = controller;
       try {
@@ -210,6 +212,8 @@ export default function Dashboard() {
         if (err?.code !== 'ERR_CANCELED' && err?.name !== 'AbortError') {
           console.error('Search error:', err);
         }
+      } finally {
+        setSearchLoading(false);
       }
     }, 300);
   }, []);
@@ -430,6 +434,7 @@ export default function Dashboard() {
       totalPages={totalPages}
       onPageChange={handlePageChange}
       isSearchActive={searchResults !== null}
+      searchLoading={searchLoading}
     />
   );
 }
