@@ -27,12 +27,11 @@ function AuthPageContent() {
     restoreSession().then((ok) => {
       if (ok) router.push('/dashboard');
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const strength = tab === 'register' ? passwordStrength(form.password) : null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
