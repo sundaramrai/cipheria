@@ -1,20 +1,9 @@
 """
-routes/vault.py — Vault CRUD with Redis caching layer.
-
-Cache flow:
-  GET  /vault        → check Redis → HIT: return instantly / MISS: query DB → write cache
-  GET  /vault/{id}   → check Redis → HIT: return instantly / MISS: query DB → write cache
-  POST /vault        → insert DB → invalidate list cache
-  PATCH /vault/{id}  → update DB → invalidate item + list cache
-  DELETE /vault/{id} → delete DB → invalidate item + list cache
-  GET  /vault/export → always DB (no cache — full export is rare + large)
-
-Latency improvement:
-  Before: every request → Neon TCP roundtrip ~80-150 ms
-  After:  cache HIT     → Upstash Redis ~1-5 ms  (95%+ of list/get requests)
+routes/vault.py — Vault CRUD with Redis caching and ETag support.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import hashlib
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 from typing import Annotated, Optional
 from uuid import UUID
@@ -47,11 +36,7 @@ ITEM_NOT_FOUND_MSG = "Item not found"
 MAX_PAGE_SIZE = 100
 
 
-# Serialisation helpers
-
-
 def _item_to_dict(item) -> dict:
-    """Convert a VaultItem ORM row (or named-tuple from column-query) to a plain dict."""
     return {
         "id": str(item.id),
         "name": item.name,
@@ -64,8 +49,28 @@ def _item_to_dict(item) -> dict:
     }
 
 
-# Export (no cache — rare, large, full fidelity required)
+def _item_to_summary_dict(item) -> dict:
+    # Excludes encrypted_data — used for list responses
+    return {
+        "id": str(item.id),
+        "name": item.name,
+        "category": item.category,
+        "favicon_url": item.favicon_url,
+        "is_favourite": item.is_favourite,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+    }
 
+
+def _make_etag(data: dict) -> str:
+    # Stable ETag from total count + most recent updated_at
+    raw = f"{data['total']}:{data['page']}:{data['page_size']}"
+    if data["items"]:
+        raw += f":{data['items'][0].get('updated_at', '')}"
+    return f'"{hashlib.md5(raw.encode()).hexdigest()}"'
+
+
+# Export — always hits DB, no cache
 
 @router.get("/export/json")
 def export_vault(
@@ -92,9 +97,12 @@ def export_vault(
     }
 
 
-# List vault items — cached, paginated
+# List — cached, paginated, ETag support, no encrypted_data
+
 @router.get("", response_model=PaginatedVaultResponse)
 def list_items(
+    request: Request,
+    response: Response,
     db: Annotated[Session, Depends(get_db)],
     current_user: CurrentUser,
     category: Annotated[Optional[str], Query()] = None,
@@ -105,17 +113,19 @@ def list_items(
 ):
     user_id = str(current_user.id)
 
-    # Cache HIT
-    # Skip search queries from cache (dynamic, low repetition → not worth caching)
+    # Skip caching for search queries (low repetition)
     if not search:
         cached = get_cached_vault_list(
             user_id, category, search, favourites_only, page, page_size
         )
         if cached is not None:
-            logger.debug(f"vault:list cache HIT  user={user_id}")
+            logger.debug(f"vault:list cache HIT user={user_id}")
+            etag = _make_etag(cached)
+            if request.headers.get("if-none-match") == etag:
+                return Response(status_code=304)
+            response.headers["ETag"] = etag
             return cached
 
-    # Cache MISS → query DB
     logger.debug(f"vault:list cache MISS user={user_id}")
 
     q = db.query(
@@ -153,17 +163,17 @@ def list_items(
         "total_pages": -(-total // page_size),
     }
 
-    # Only cache non-search results (search results change unpredictably)
     if not search:
         set_cached_vault_list(
             user_id, category, search, favourites_only, page, page_size, result
         )
+        etag = _make_etag(result)
+        response.headers["ETag"] = etag
 
     return result
 
 
-# Get single vault item — cached
-
+# Get single item — cached
 
 @router.get(
     "/{item_id}",
@@ -178,20 +188,15 @@ def get_item(
     user_id = str(current_user.id)
     item_key = str(item_id)
 
-    # Cache HIT
     cached = get_cached_vault_item(user_id, item_key)
     if cached is not None:
-        logger.debug(f"vault:item cache HIT  user={user_id} item={item_key}")
+        logger.debug(f"vault:item cache HIT user={user_id} item={item_key}")
         return cached
 
-    # Cache MISS → DB
     logger.debug(f"vault:item cache MISS user={user_id} item={item_key}")
     item = (
         db.query(VaultItem)
-        .filter(
-            VaultItem.id == item_id,
-            VaultItem.user_id == current_user.id,
-        )
+        .filter(VaultItem.id == item_id, VaultItem.user_id == current_user.id)
         .first()
     )
     if not item:
@@ -202,8 +207,7 @@ def get_item(
     return data
 
 
-# Create vault item — invalidates list cache
-
+# Create — invalidates list cache
 
 @router.post("", response_model=VaultItemResponse, status_code=201)
 def create_item(
@@ -224,19 +228,15 @@ def create_item(
     db.add(item)
     db.commit()
 
-    # New item → all list pages are stale
     invalidate_vault_list(user_id)
-    logger.debug(f"vault:list cache BUSTED (create) user={user_id}")
+    logger.debug(f"vault:list cache busted (create) user={user_id}")
 
     data = _item_to_dict(item)
-    # Pre-warm item cache so the next GET /{id} is a cache hit
     set_cached_vault_item(user_id, str(item.id), data)
-
     return data
 
 
-# Update vault item — invalidates item + list cache
-
+# Update — invalidates item + list cache
 
 @router.patch(
     "/{item_id}",
@@ -254,10 +254,7 @@ def update_item(
 
     item = (
         db.query(VaultItem)
-        .filter(
-            VaultItem.id == item_id,
-            VaultItem.user_id == current_user.id,
-        )
+        .filter(VaultItem.id == item_id, VaultItem.user_id == current_user.id)
         .first()
     )
     if not item:
@@ -267,23 +264,21 @@ def update_item(
         setattr(item, field, value)
     db.commit()
 
-    # Bust stale caches immediately
     invalidate_vault_item(user_id, item_key)
     invalidate_vault_list(user_id)
-    logger.debug(f"vault cache BUSTED (update) user={user_id} item={item_key}")
+    logger.debug(f"vault cache busted (update) user={user_id} item={item_key}")
 
     data = _item_to_dict(item)
-    # Re-warm item cache with fresh data
     set_cached_vault_item(user_id, item_key, data)
-
     return data
 
 
-# Delete vault item — invalidates item + list cache
-
+# Delete — invalidates item + list cache
 
 @router.delete(
-    "/{item_id}", status_code=204, responses={404: {"description": ITEM_NOT_FOUND_MSG}}
+    "/{item_id}",
+    status_code=204,
+    responses={404: {"description": ITEM_NOT_FOUND_MSG}},
 )
 def delete_item(
     item_id: UUID,
@@ -295,10 +290,7 @@ def delete_item(
 
     item = (
         db.query(VaultItem)
-        .filter(
-            VaultItem.id == item_id,
-            VaultItem.user_id == current_user.id,
-        )
+        .filter(VaultItem.id == item_id, VaultItem.user_id == current_user.id)
         .first()
     )
     if not item:
@@ -309,4 +301,4 @@ def delete_item(
 
     invalidate_vault_item(user_id, item_key)
     invalidate_vault_list(user_id)
-    logger.debug(f"vault cache BUSTED (delete) user={user_id} item={item_key}")
+    logger.debug(f"vault cache busted (delete) user={user_id} item={item_key}")
