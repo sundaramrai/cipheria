@@ -1,9 +1,9 @@
 """
 deps.py — FastAPI dependency providers with Redis cache integration.
 
-get_current_user_from_db now checks Redis before hitting Neon:
-  Cache HIT  → ~2 ms (no DB roundtrip)
-  Cache MISS → ~80-150 ms DB query → result written to cache
+get_current_user_from_db checks Redis before hitting the DB:
+  Cache HIT  → ~2 ms
+  Cache MISS → ~80-150 ms DB query, result written to cache
 """
 
 from typing import Annotated
@@ -60,27 +60,11 @@ def get_current_user_from_db(
     token_user: Annotated[TokenUser, Depends(get_current_token_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> User:
-    """
-    Returns the User ORM object.
-
-    Cache strategy:
-      1. Check Redis for user:{id}
-      2. On HIT  → build a lightweight User-like object from cache (no DB)
-      3. On MISS → query Neon, write result to cache, return ORM object
-    """
     user_id = str(token_user.id)
 
-    # Cache HIT
     cached = get_cached_user(user_id)
     if cached:
-        logger.debug(f"user cache HIT  id={user_id}")
-
-        # Re-hydrate into a minimal User-compatible object so callers can access
-        # .id, .email, .vault_salt, .master_hint, .full_name, .is_active etc.
-        # We use the real User class to keep type compatibility with downstream code.
-        #
-        # We don't have hashed_password in cache (intentionally stripped).
-        # Routes that need to call verify_password() always hit DB directly (login).
+        logger.debug(f"user cache HIT id={user_id}")
         fake_user = User(
             id=token_user.id,
             email=cached.get("email", ""),
@@ -89,7 +73,6 @@ def get_current_user_from_db(
             master_hint=cached.get("master_hint"),
             vault_salt=cached.get("vault_salt", ""),
         )
-        # Parse created_at back to datetime for serialisation
         created_raw = cached.get("created_at")
         if created_raw:
             try:
@@ -101,13 +84,11 @@ def get_current_user_from_db(
             raise auth_exception()
         return fake_user
 
-    # Cache MISS → DB
     logger.debug(f"user cache MISS id={user_id}")
     user = db.query(User).filter(User.id == token_user.id).first()
     if not user or not user.is_active:
         raise auth_exception()
 
-    # Prime cache for next request
     set_cached_user(
         user_id,
         {
@@ -123,6 +104,5 @@ def get_current_user_from_db(
     return user
 
 
-# Annotated shorthands for route dependencies — keeps route signatures clean and types correct.
 CurrentUser = Annotated[TokenUser, Depends(get_current_token_user)]
 DBUser = Annotated[User, Depends(get_current_user_from_db)]
