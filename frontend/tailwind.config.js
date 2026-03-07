@@ -2,6 +2,8 @@
 module.exports = {
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx}',
+    './lib/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
     extend: {
@@ -12,7 +14,7 @@ module.exports = {
       },
       colors: {
         obsidian: {
-          50:  '#f2f2f0',
+          50: '#f2f2f0',
           100: '#e4e3df',
           200: '#c9c7be',
           300: '#aeab9d',
@@ -44,7 +46,7 @@ module.exports = {
       keyframes: {
         fadeUp: {
           from: { opacity: '0', transform: 'translateY(16px)' },
-          to:   { opacity: '1', transform: 'translateY(0)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
         },
       },
     },
