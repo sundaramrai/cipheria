@@ -1,14 +1,12 @@
 """
 crypto.py — Server-side cryptography utilities.
 
-Note: Vault item *data* is encrypted client-side with AES-256-GCM using a key
-derived from the user's master password (PBKDF2-SHA256, 600k iterations) — the
-server never sees plaintext passwords or decryption keys.
+Vault item data is encrypted client-side with AES-256-GCM using a key
+derived from the user's master password (PBKDF2-SHA256, 600k iterations).
+The server never sees plaintext vault content or decryption keys.
 
-This module handles:
-  - Password hashing (bcrypt) for the auth password
-  - JWT creation / verification
-  - Generating secure random salts for client key derivation
+Handles: password hashing (bcrypt), JWT creation/verification,
+and secure salt generation for client-side key derivation.
 """
 
 import os
@@ -22,8 +20,6 @@ from typing import Optional
 import bcrypt
 from jose import jwt
 
-# Config
-
 SECRET_KEY = os.getenv("JWT_SECRET", secrets.token_hex(48))
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -31,12 +27,9 @@ REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 
 def _pre_hash(password: str) -> bytes:
-    """SHA-256 + base64 encode before bcrypt to safely handle passwords >72 bytes."""
+    # SHA-256 + base64 encode before bcrypt to safely handle passwords >72 bytes
     digest = hashlib.sha256(password.encode()).digest()
     return base64.b64encode(digest)
-
-
-# Password hashing
 
 
 def hash_password(password: str) -> str:
@@ -45,9 +38,6 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(_pre_hash(plain), hashed.encode())
-
-
-# JWT
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -70,14 +60,9 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
 
 
-# Secure utilities
-
-
 def generate_salt(length: int = 32) -> str:
-    """Generate a cryptographically secure random salt (hex string)."""
     return secrets.token_hex(length)
 
 
 def hash_refresh_token(token: str) -> str:
-    """Store only a hash of the refresh token in the DB."""
     return hashlib.sha256(token.encode()).hexdigest()
