@@ -38,6 +38,7 @@ def _pre_hash(password: str) -> bytes:
 
 # Password hashing
 
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(_pre_hash(password), bcrypt.gensalt(rounds=12)).decode()
 
@@ -48,9 +49,12 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 # JWT
 
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
     to_encode.update({"exp": expire, "type": "access"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -67,6 +71,7 @@ def decode_token(token: str) -> dict:
 
 
 # Secure utilities
+
 
 def generate_salt(length: int = 32) -> str:
     """Generate a cryptographically secure random salt (hex string)."""
