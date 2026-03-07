@@ -11,6 +11,17 @@ import { tryGetFaviconUrl, fetchAndDecryptItem, buildPayload } from '../../../co
 import { LockedVaultScreen } from '../../../components/dashboard/LockedVaultScreen';
 import { MainDashboard } from '../../../components/dashboard/MainDashboard';
 
+async function decryptSearchItem(item: VaultItem, key: CryptoKey, storeItems: VaultItem[]): Promise<VaultItem> {
+  const cached = storeItems.find((v) => v.id === item.id);
+  if (cached?.decrypted) return cached;
+  if (!item.encrypted_data) return item;
+  try {
+    return { ...item, decrypted: await decryptData(item.encrypted_data, key) };
+  } catch {
+    return item;
+  }
+}
+
 // # vault unlock hook
 function useVaultUnlock(
   user: any,
@@ -33,19 +44,30 @@ function useVaultUnlock(
           const key = await deriveKey(masterPassword, salt);
           update('Verifying master password...');
           const { data: listResult } = await vaultApi.list({ page_size: 50 });
-          const items = listResult.items;
+          const items: VaultItem[] = listResult.items;
           if (items.length > 0) {
             try {
-              const { data: firstItem } = await vaultApi.get(items[0].id);
-              await decryptData(firstItem.encrypted_data, key);
+              // items[0].encrypted_data is always present — list endpoint includes it
+              await decryptData(items[0].encrypted_data!, key);
             } catch (verifyErr) {
               console.error('[unlock] Key verification failed:', verifyErr);
               throw new Error('WRONG_PASSWORD');
             }
           }
           setVaultKey(key);
-          update('Loading items...');
-          setVaultItems(items);
+          update('Decrypting items...');
+          const decryptedItems = await Promise.all(
+            items.map(async (item) => {
+              if (!item.encrypted_data) return item;
+              try {
+                const dec = await decryptData(item.encrypted_data, key);
+                return { ...item, decrypted: dec };
+              } catch {
+                return item;
+              }
+            }),
+          );
+          setVaultItems(decryptedItems);
           setTotalPages(listResult.total_pages ?? 1);
           setMasterPassword('');
         },
@@ -149,6 +171,7 @@ export default function Dashboard() {
     const { vaultItems: storeItems, cryptoKey: liveKey } = useAuthStore.getState();
     const cached = storeItems.find((v) => v.id === item.id);
     if (cached?.decrypted) { setSelectedItem(cached); return; }
+    if (item.decrypted) return;  // already decrypted (e.g. from search results)
     if (!liveKey) return;
     if (decryptingItemIds.current.has(item.id)) return;
     decryptingItemIds.current.add(item.id);
@@ -176,7 +199,13 @@ export default function Dashboard() {
       searchAbortRef.current = controller;
       try {
         const { data } = await vaultApi.list({ search: val }, controller.signal);
-        if (!controller.signal.aborted) setSearchResults(data.items);
+        if (controller.signal.aborted) return;
+        const key = useAuthStore.getState().cryptoKey;
+        const storeItems = useAuthStore.getState().vaultItems;
+        const decryptedResults = key
+          ? await Promise.all(data.items.map((item: VaultItem) => decryptSearchItem(item, key, storeItems)))
+          : data.items;
+        if (!controller.signal.aborted) setSearchResults(decryptedResults);
       } catch (err: any) {
         if (err?.code !== 'ERR_CANCELED' && err?.name !== 'AbortError') {
           console.error('Search error:', err);
@@ -311,7 +340,20 @@ export default function Dashboard() {
   const handlePageChange = useCallback(async (newPage: number) => {
     try {
       const { data } = await vaultApi.list({ page: newPage, page_size: 50 });
-      setVaultItems(data.items);
+      const key = useAuthStore.getState().cryptoKey;
+      const decryptedItems = key
+        ? await Promise.all(
+          data.items.map(async (item: any) => {
+            try {
+              const dec = await decryptData(item.encrypted_data, key);
+              return { ...item, decrypted: dec };
+            } catch {
+              return item;
+            }
+          }),
+        )
+        : data.items;
+      setVaultItems(decryptedItems);
       setPage(newPage);
       setTotalPages(data.total_pages ?? 1);
       decryptingItemIds.current.clear();
