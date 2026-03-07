@@ -109,7 +109,7 @@ class VaultItemResponse(BaseModel):
 
 class PaginatedVaultResponse(BaseModel):
     """Paginated wrapper for vault list endpoint."""
-    items: List[VaultItemSummary]
+    items: List[VaultItemResponse]
     total: int
     page: int
     page_size: int
