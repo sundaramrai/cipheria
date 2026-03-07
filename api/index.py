@@ -4,6 +4,7 @@ api/index.py — FastAPI app entry point.
 
 import sys
 import os
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 from contextlib import asynccontextmanager
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
     # Dev: auto-create tables
     if os.getenv("ENVIRONMENT", "production") == "development":
         from database import create_tables
+
         try:
             create_tables()
         except Exception as e:
@@ -30,11 +32,14 @@ async def lifespan(app: FastAPI):
 
     # Verify Redis connection on startup
     from cache import cache_ping, get_redis
+
     if get_redis():
         ok = cache_ping()
         print(f"Redis cache: {'connected' if ok else 'ping failed — degraded mode'}")
     else:
-        print("Redis cache: not configured (REDIS_URL missing) — all requests will hit DB")
+        print(
+            "Redis cache: not configured (REDIS_URL missing) — all requests will hit DB"
+        )
 
     yield
 
@@ -55,7 +60,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 # CORS — locked to specific origins via env var in production
-_allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")]
+_allowed_origins = [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+]
 _allowed_origin_regex = os.getenv(
     "ALLOWED_ORIGIN_REGEX",
     r"https://.*\.vercel\.app|chrome-extension://.*|moz-extension://.*",
@@ -78,6 +85,7 @@ app.include_router(vault_router, prefix="/api")
 @app.get("/api/health")
 async def health():
     from cache import cache_ping, get_redis
+
     redis_ok = cache_ping() if get_redis() else None
     if redis_ok:
         cache_status = "connected"
@@ -85,4 +93,8 @@ async def health():
         cache_status = "disabled"
     else:
         cache_status = "degraded"
-    return {"status": "ok", "service": "cipheria-api", "cache": cache_status,}
+    return {
+        "status": "ok",
+        "service": "cipheria-api",
+        "cache": cache_status,
+    }
