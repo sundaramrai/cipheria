@@ -1,30 +1,79 @@
 'use client';
 import { useState } from 'react';
-import { Eye, EyeOff, Copy } from 'lucide-react';
+import { Eye, EyeOff, Copy, CheckCheck } from 'lucide-react';
 
-export function Field({ label, value, secret, onCopy }: Readonly<{
-  label: string; value: string; secret?: boolean; multiline?: boolean; onCopy?: () => void;
+export function Field({
+  label,
+  value,
+  secret,
+  onCopy,
+}: Readonly<{
+  label: string;
+  value: string;
+  secret?: boolean;
+  multiline?: boolean;
+  onCopy?: () => void;
 }>) {
   const [show, setShow] = useState(!secret);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (!onCopy) return;
+    onCopy();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+
   return (
-    <div className="glass" style={{ borderRadius: 12, padding: '16px 18px' }}>
-      <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <p style={{
-          flex: 1, fontSize: '0.95rem', color: 'var(--text-primary)', fontFamily: secret ? 'DM Mono, monospace' : 'inherit',
-          wordBreak: 'break-all', lineHeight: 1.6,
-        }}>
-          {secret && !show ? '••••••••••••••••' : value}
+    <div
+      className="glass"
+      style={{ borderRadius: 'var(--radius-md)', padding: '13px 15px' }}
+    >
+      <p
+        style={{
+          fontSize: '0.67rem',
+          fontWeight: 600,
+          letterSpacing: '0.09em',
+          textTransform: 'uppercase',
+          color: 'var(--text-tertiary)',
+          marginBottom: 7,
+          fontFamily: 'var(--font-body)',
+        }}
+      >
+        {label}
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <p
+          style={{
+            flex: 1,
+            fontSize: '0.92rem',
+            color: 'var(--text-primary)',
+            fontFamily: secret ? 'var(--font-mono), DM Mono, monospace' : 'inherit',
+            wordBreak: 'break-all',
+            lineHeight: 1.6,
+            letterSpacing: secret && !show ? '0.08em' : 'inherit',
+          }}
+        >
+          {secret && !show ? '••••••••••••' : value}
         </p>
-        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
           {secret && (
-            <button onClick={() => setShow(!show)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 4 }}>
-              {show ? <EyeOff size={15} /> : <Eye size={15} />}
+            <button
+              className="btn-icon"
+              onClick={() => setShow(!show)}
+              title={show ? 'Hide' : 'Reveal'}
+            >
+              {show ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           )}
           {onCopy && (
-            <button onClick={onCopy} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 4 }}>
-              <Copy size={15} />
+            <button
+              className="btn-icon"
+              onClick={handleCopy}
+              title="Copy"
+              style={{ color: copied ? 'var(--success)' : undefined }}
+            >
+              {copied ? <CheckCheck size={14} /> : <Copy size={14} />}
             </button>
           )}
         </div>
@@ -33,35 +82,46 @@ export function Field({ label, value, secret, onCopy }: Readonly<{
   );
 }
 
-export function HibpCheck({ hibp, onCheck }: Readonly<{
+export function HibpCheck({
+  hibp,
+  onCheck,
+}: Readonly<{
   hibp: { checking: boolean; count: number | null };
   onCheck: () => void;
 }>) {
   const { checking, count } = hibp;
+
   let statusColor = 'var(--text-secondary)';
-  if (count === 0) statusColor = '#22c55e';
-  else if (count !== null && count > 0) statusColor = '#ef4444';
+  if (count === 0) statusColor = 'var(--success)';
+  else if (count !== null && count > 0) statusColor = 'var(--danger)';
+
   let statusText = '';
   if (count === -1) statusText = 'Check failed';
-  else if (count === 0) statusText = '✓ Not found in known breaches';
+  else if (count === 0) statusText = '✓ Not found in any breaches';
   else if (count !== null) statusText = `⚠ Found in ${count.toLocaleString()} breaches`;
+
+  let badgeClass = '';
+  if (count === 0) badgeClass = 'badge badge-green';
+  else if (count !== null && count > 0) badgeClass = 'badge badge-red';
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: -8 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: -4 }}>
       <button
         type="button"
         onClick={onCheck}
         disabled={checking}
+        className="btn-ghost"
         style={{
-          fontSize: '0.72rem', padding: '4px 10px', borderRadius: 6,
-          border: '1px solid var(--border)', background: 'transparent',
-          color: 'var(--text-secondary)', cursor: checking ? 'default' : 'pointer',
+          fontSize: '0.72rem',
+          padding: '4px 10px',
+          minHeight: 30,
           opacity: checking ? 0.6 : 1,
         }}
       >
-        {checking ? 'Checking…' : 'Check breaches (HIBP)'}
+        {checking ? 'Checking…' : 'Check breaches'}
       </button>
       {count !== null && (
-        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: statusColor }}>
+        <span className={badgeClass || ''} style={{ color: statusColor, fontSize: '0.72rem', fontWeight: 600 }}>
           {statusText}
         </span>
       )}

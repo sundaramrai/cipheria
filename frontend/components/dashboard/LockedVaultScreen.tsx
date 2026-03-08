@@ -15,11 +15,7 @@ interface Props {
 export function LockedVaultScreen({ user, masterPassword, setMasterPassword, unlocking, signout, setSignout, unlockVault, handleLogout }: Readonly<Props>) {
     const handleSignout = async () => {
         setSignout(true);
-        try {
-            await handleLogout();
-        } finally {
-            setSignout(false);
-        }
+        try { await handleLogout(); } finally { setSignout(false); }
     };
 
     return (
@@ -31,75 +27,119 @@ export function LockedVaultScreen({ user, masterPassword, setMasterPassword, unl
                 justifyContent: 'center',
                 background: 'var(--bg)',
                 padding: 'clamp(16px, 5vw, 24px)',
-                overflowY: 'auto',
+                position: 'relative',
             }}
         >
-            <div style={{
-                position: 'fixed', top: '30%', left: '50%', transform: 'translateX(-50%)',
-                width: 'min(500px, 100vw)', height: 'min(500px, 100vw)', borderRadius: '50%',
-                background: 'radial-gradient(ellipse, rgba(245,158,11,0.08) 0%, transparent 70%)',
-                pointerEvents: 'none',
-            }} />
+            {/* Ambient glow */}
             <div
-                className="glass animate-fade-up"
+                aria-hidden
                 style={{
-                    borderRadius: 24,
-                    padding: 'clamp(24px, 6vw, 48px)',
+                    position: 'fixed',
+                    top: '25%',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: 'min(560px, 120vw)',
+                    height: 'min(560px, 120vw)',
+                    borderRadius: '50%',
+                    background: 'radial-gradient(ellipse, rgba(245,158,11,0.07) 0%, transparent 68%)',
+                    pointerEvents: 'none',
+                }}
+            />
+
+            <div
+                style={{
                     width: '100%',
-                    maxWidth: 420,
+                    maxWidth: 400,
                     position: 'relative',
                     zIndex: 1,
-                    margin: '0 auto',
                 }}
             >
-                <div style={{ textAlign: 'center', marginBottom: 'clamp(24px, 6vw, 36px)' }}>
-                    <div style={{
-                        width: 72, height: 72, borderRadius: 18,
-                        background: 'var(--accent-dim)', border: '1px solid rgba(245,158,11,0.3)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px',
-                    }}>
-                        <Lock size={32} color="var(--accent)" />
+                {/* Lock icon — separate stagger */}
+                <div
+                    className="animate-fade-up"
+                    style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        marginBottom: 28,
+                    }}
+                >
+                    <div
+                        style={{
+                            width: 64,
+                            height: 64,
+                            borderRadius: 18,
+                            background: 'var(--accent-dim)',
+                            border: '1px solid rgba(245,158,11,0.25)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            boxShadow: '0 0 30px rgba(245,158,11,0.1)',
+                            marginBottom: 18,
+                        }}
+                    >
+                        <Lock size={28} color="var(--accent)" />
                     </div>
-                    <h2 className="font-display" style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', color: 'var(--text-primary)', marginBottom: 8 }}>
+                    <h2
+                        className="font-display"
+                        style={{ fontSize: 'clamp(1.75rem, 6vw, 2.25rem)', color: 'var(--text-primary)', marginBottom: 6 }}
+                    >
                         Vault Locked
                     </h2>
-                    <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                        Enter your master password to unlock
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                        Enter your master password to continue
                     </p>
                     {user?.master_hint && (
-                        <p style={{ marginTop: 12, fontSize: '0.8rem', color: 'rgba(245,158,11,0.7)', fontStyle: 'italic' }}>
+                        <p
+                            style={{
+                                marginTop: 10,
+                                fontSize: '0.78rem',
+                                color: 'rgba(245,158,11,0.65)',
+                                fontStyle: 'italic',
+                                textAlign: 'center',
+                            }}
+                        >
                             Hint: {user.master_hint}
                         </p>
                     )}
                 </div>
-                <form onSubmit={unlockVault} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    <input
-                        className="input-field"
-                        type="password"
-                        placeholder="Master password"
-                        required
-                        autoFocus
-                        value={masterPassword}
-                        onChange={(e) => setMasterPassword(e.target.value)}
-                        style={{ fontSize: 'max(16px, 0.9rem)' }}
-                    />
-                    <button
-                        className="btn-primary"
-                        type="submit"
-                        disabled={unlocking}
-                        style={{ opacity: unlocking ? 0.7 : 1, minHeight: 48 }}
-                    >
-                        {unlocking ? 'Unlocking...' : 'Unlock Vault'}
-                    </button>
-                </form>
-                <button
-                    onClick={handleSignout}
-                    className="btn-ghost"
-                    disabled={signout}
-                    style={{ width: '100%', marginTop: 12, minHeight: 44, opacity: signout ? 0.7 : 1, color: 'var(--danger)' }}
+
+                {/* Card */}
+                <div
+                    className="glass animate-fade-up stagger-2"
+                    style={{ borderRadius: 'var(--radius-xl)', padding: 'clamp(22px, 6vw, 36px)' }}
                 >
-                    {signout ? 'Signing out...' : 'Sign out'}
-                </button>
+                    <form onSubmit={unlockVault} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <input
+                            className="input-field"
+                            type="password"
+                            placeholder="Master password"
+                            required
+                            autoFocus
+                            value={masterPassword}
+                            onChange={(e) => setMasterPassword(e.target.value)}
+                        />
+                        <button
+                            className="btn-primary"
+                            type="submit"
+                            disabled={unlocking}
+                            style={{ width: '100%', minHeight: 46 }}
+                        >
+                            {unlocking ? 'Unlocking…' : 'Unlock Vault'}
+                        </button>
+                    </form>
+
+                    <div className="divider" style={{ margin: '14px 0' }} />
+
+                    <button
+                        onClick={handleSignout}
+                        className="btn-ghost btn-danger"
+                        disabled={signout}
+                        style={{ width: '100%', minHeight: 42, fontSize: '0.85rem' }}
+                    >
+                        {signout ? 'Signing out…' : 'Sign out of Cipheria'}
+                    </button>
+                </div>
             </div>
         </div>
     );

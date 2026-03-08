@@ -3,20 +3,24 @@ import React, { useState, useEffect } from 'react';
 import { Globe, CreditCard, StickyNote, User, Plus, Edit2, X, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { generatePassword, passwordStrength } from '@/lib/crypto';
 
-// Shared label helper
+/* Field label */
 export function FieldLabel({ htmlFor, children }: Readonly<{ htmlFor: string; children: React.ReactNode }>) {
   return (
-    <label htmlFor={htmlFor} style={{
-      display: 'flex', alignItems: 'center', gap: 6,
-      fontSize: '0.72rem', fontWeight: 600, letterSpacing: '0.06em',
-      textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 8,
-    }}>
+    <label
+      htmlFor={htmlFor}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 5,
+        fontSize: '0.68rem', fontWeight: 600,
+        letterSpacing: '0.09em', textTransform: 'uppercase',
+        color: 'var(--text-secondary)', marginBottom: 7,
+      }}
+    >
       {children}
     </label>
   );
 }
 
-// Category pill selector
+/* Category picker */
 const CATEGORY_CONFIG = [
   { value: 'login', label: 'Login', icon: Globe },
   { value: 'card', label: 'Card', icon: CreditCard },
@@ -26,7 +30,7 @@ const CATEGORY_CONFIG = [
 
 export function CategoryPicker({ value, onChange }: Readonly<{ value: string; onChange: (v: string) => void }>) {
   return (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
       {CATEGORY_CONFIG.map(({ value: v, label, icon: Icon }) => {
         const active = value === v;
         return (
@@ -36,16 +40,20 @@ export function CategoryPicker({ value, onChange }: Readonly<{ value: string; on
             onClick={() => onChange(v)}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '7px 14px', borderRadius: 20, border: '1px solid',
-              borderColor: active ? 'var(--accent)' : 'var(--border)',
+              padding: '6px 13px',
+              borderRadius: 100,
+              border: `1px solid ${active ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`,
               background: active ? 'var(--accent-dim)' : 'transparent',
               color: active ? 'var(--accent)' : 'var(--text-secondary)',
-              fontSize: '0.8rem', fontFamily: 'Outfit, sans-serif',
-              cursor: 'pointer', transition: 'all 0.15s',
-              minHeight: 36,
+              fontSize: '0.78rem',
+              fontFamily: 'var(--font-body)',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              minHeight: 32,
+              fontWeight: active ? 500 : 400,
             }}
           >
-            <Icon size={13} />
+            <Icon size={12} strokeWidth={active ? 2.2 : 1.8} />
             {label}
           </button>
         );
@@ -54,9 +62,12 @@ export function CategoryPicker({ value, onChange }: Readonly<{ value: string; on
   );
 }
 
-// Modal shell
+/* Modal shell */
 export function Modal({ children, onClose, title, icon }: Readonly<{
-  children: React.ReactNode; onClose: () => void; title: string; icon?: React.ReactNode;
+  children: React.ReactNode;
+  onClose: () => void;
+  title: string;
+  icon?: React.ReactNode;
 }>) {
   const dialogRef = React.useRef<HTMLDialogElement>(null);
 
@@ -78,24 +89,26 @@ export function Modal({ children, onClose, title, icon }: Readonly<{
       ref={dialogRef}
       style={{
         position: 'fixed', inset: 0, margin: 0,
-        width: '100%', height: '100%', maxWidth: '100%', maxHeight: '100%',
-        background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
+        width: '100%', height: '100%',
+        maxWidth: '100%', maxHeight: '100%',
+        background: 'rgba(0,0,0,0.7)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
         display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
         zIndex: 100, padding: 0, border: 'none',
       }}
     >
       <style>{`
         @media (min-width: 600px) {
-          .modal-sheet { border-radius: 20px !important; margin-bottom: 0 !important; }
           .modal-dialog { align-items: center !important; padding: 24px !important; }
+          .modal-sheet  { border-radius: var(--radius-xl) !important; margin-bottom: 0 !important; }
+          .modal-handle { display: none !important; }
         }
-        @media (min-width: 600px) { .modal-handle { display: none !important; } }
         @keyframes slideUp {
-          from { transform: translateY(24px); opacity: 0; }
+          from { transform: translateY(20px); opacity: 0; }
           to   { transform: translateY(0);    opacity: 1; }
         }
-        .modal-sheet { animation: slideUp 0.28s cubic-bezier(0.32,0.72,0,1) forwards; }
+        .modal-sheet { animation: slideUp 0.26s cubic-bezier(0.32, 0.72, 0, 1) forwards; }
       `}</style>
 
       <div
@@ -103,56 +116,65 @@ export function Modal({ children, onClose, title, icon }: Readonly<{
         style={{
           background: 'var(--bg-card)',
           border: '1px solid var(--border)',
-          borderRadius: '24px 24px 0 0',
-          width: '100%', maxWidth: 520,
-          maxHeight: '92dvh',
+          borderRadius: 'var(--radius-xl) var(--radius-xl) 0 0',
+          width: '100%', maxWidth: 500,
+          maxHeight: '93dvh',
           display: 'flex', flexDirection: 'column',
           overflow: 'hidden',
-          boxShadow: '0 -8px 40px rgba(0,0,0,0.5)',
+          boxShadow: '0 -8px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(245,158,11,0.06)',
         }}
       >
-        <div className="modal-handle" style={{ display: 'flex', justifyContent: 'center', paddingTop: 12, paddingBottom: 4, flexShrink: 0 }}>
-          <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.15)' }} />
+        {/* Mobile drag handle */}
+        <div
+          className="modal-handle"
+          style={{ display: 'flex', justifyContent: 'center', paddingTop: 10, paddingBottom: 2, flexShrink: 0 }}
+        >
+          <div style={{ width: 32, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.12)' }} />
         </div>
 
+        {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '20px 24px 0',
+          padding: '18px 22px 0',
           flexShrink: 0,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {icon && (
               <div style={{
-                width: 36, height: 36, borderRadius: 10,
-                background: 'var(--accent-dim)', border: '1px solid rgba(245,158,11,0.25)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                width: 32, height: 32, borderRadius: 9,
+                background: 'var(--accent-dim)',
+                border: '1px solid rgba(245,158,11,0.22)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
               }}>
                 {icon}
               </div>
             )}
-            <h3 className="font-display" style={{ fontSize: '1.4rem', color: 'var(--text-primary)', lineHeight: 1 }}>
+            <h3
+              className="font-display"
+              style={{ fontSize: '1.35rem', color: 'var(--text-primary)', lineHeight: 1 }}
+            >
               {title}
             </h3>
           </div>
           <button
             onClick={onClose}
-            style={{
-              background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)',
-              borderRadius: 8, cursor: 'pointer', color: 'var(--text-secondary)',
-              width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.15s', flexShrink: 0,
-            }}
+            className="btn-icon"
+            style={{ borderRadius: 8 }}
           >
-            <X size={16} />
+            <X size={14} />
           </button>
         </div>
 
-        <div style={{ height: 1, background: 'var(--border)', margin: '16px 0 0', flexShrink: 0 }} />
+        {/* Divider */}
+        <div className="hairline" style={{ margin: '16px 0 0', flexShrink: 0 }} />
 
+        {/* Scrollable body */}
         <div style={{
-          overflowY: 'auto', flex: 1,
-          padding: '20px 24px',
-          paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
+          overflowY: 'auto',
+          flex: 1,
+          padding: '18px 22px',
+          paddingBottom: 'calc(18px + env(safe-area-inset-bottom, 0px))',
         }}>
           {children}
         </div>
@@ -161,76 +183,87 @@ export function Modal({ children, onClose, title, icon }: Readonly<{
   );
 }
 
+/* Password strength bar */
+function StrengthBar({ password }: Readonly<{ password: string }>) {
+  const s = password ? passwordStrength(password) : null;
+  if (!s || !password) return null;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: 'flex', gap: 3, marginBottom: 5 }}>
+        {[0, 1, 2, 3, 4].map(i => (
+          <div
+            key={i}
+            style={{
+              height: 2, flex: 1, borderRadius: 2,
+              background: i <= s.score ? s.color : 'rgba(255,255,255,0.07)',
+              transition: 'background 0.3s',
+            }}
+          />
+        ))}
+      </div>
+      <span style={{ fontSize: '0.7rem', color: s.color, fontWeight: 500 }}>{s.label}</span>
+    </div>
+  );
+}
+
+/* Login form fields */
 function LoginFormFields({ form, setForm, genOptions }: Readonly<{ form: any; setForm: (f: any) => void; genOptions: any }>) {
   const [showPw, setShowPw] = useState(false);
-  const s = form.password ? passwordStrength(form.password) : null;
   return (
     <>
       <div>
         <FieldLabel htmlFor="login-url">URL</FieldLabel>
-        <input
-          id="login-url" className="input-field" placeholder="https://github.com"
-          value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })}
-          style={{ fontSize: 'max(16px, 0.9rem)' }}
-        />
+        <input id="login-url" className="input-field" placeholder="https://github.com"
+          value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
       </div>
       <div>
         <FieldLabel htmlFor="login-username">Username / Email</FieldLabel>
-        <input
-          id="login-username" className="input-field" placeholder="you@example.com"
-          value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })}
-          style={{ fontSize: 'max(16px, 0.9rem)' }}
-        />
+        <input id="login-username" className="input-field" placeholder="you@example.com"
+          value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
       </div>
       <div>
         <FieldLabel htmlFor="login-password">Password</FieldLabel>
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ position: 'relative', flex: 1 }}>
             <input
-              id="login-password" className="input-field"
-              type={showPw ? 'text' : 'password'} placeholder="••••••••"
-              value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
-              style={{ paddingRight: 44, fontSize: 'max(16px, 0.9rem)' }}
+              id="login-password"
+              className="input-field"
+              type={showPw ? 'text' : 'password'}
+              placeholder="••••••••••••"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              style={{ paddingRight: 42, fontFamily: showPw ? 'inherit' : 'var(--font-mono)' }}
             />
             <button
-              type="button" onClick={() => setShowPw(!showPw)}
+              type="button"
+              onClick={() => setShowPw(!showPw)}
               style={{
-                position: 'absolute', right: 0, top: 0, bottom: 0, width: 44,
+                position: 'absolute', right: 0, top: 0, bottom: 0, width: 42,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)',
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--text-secondary)',
               }}
             >
-              {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
+              {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
           <button
-            type="button" className="btn-ghost"
-            style={{ padding: '0 14px', flexShrink: 0, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}
+            type="button"
+            className="btn-ghost"
+            style={{ padding: '0 13px', flexShrink: 0, minHeight: 44, display: 'flex', alignItems: 'center', gap: 5 }}
             onClick={() => setForm({ ...form, password: generatePassword(genOptions) })}
             title="Generate password"
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={13} />
           </button>
         </div>
-        {s && (
-          <div style={{ marginTop: 8 }}>
-            <div style={{ display: 'flex', gap: 3, marginBottom: 5 }}>
-              {[0, 1, 2, 3, 4].map(i => (
-                <div key={i} style={{
-                  height: 3, flex: 1, borderRadius: 2,
-                  background: i <= s.score ? s.color : 'rgba(255,255,255,0.08)',
-                  transition: 'background 0.3s',
-                }} />
-              ))}
-            </div>
-            <span style={{ fontSize: '0.72rem', color: s.color }}>{s.label}</span>
-          </div>
-        )}
+        <StrengthBar password={form.password} />
       </div>
     </>
   );
 }
 
+/* Card form fields */
 function CardFormFields({ form, setForm, prefix }: Readonly<{ form: any; setForm: (f: any) => void; prefix: string }>) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -238,65 +271,60 @@ function CardFormFields({ form, setForm, prefix }: Readonly<{ form: any; setForm
         <FieldLabel htmlFor={`${prefix}-card-number`}>Card Number</FieldLabel>
         <input id={`${prefix}-card-number`} className="input-field" placeholder="4111 1111 1111 1111"
           value={form.cardNumber} onChange={(e) => setForm({ ...form, cardNumber: e.target.value })}
-          style={{ fontSize: 'max(16px, 0.9rem)', fontFamily: 'DM Mono, monospace', letterSpacing: '0.05em' }} />
+          style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }} />
       </div>
       <div>
         <FieldLabel htmlFor={`${prefix}-card-holder`}>Cardholder Name</FieldLabel>
         <input id={`${prefix}-card-holder`} className="input-field" placeholder="Jane Smith"
-          value={form.cardHolder} onChange={(e) => setForm({ ...form, cardHolder: e.target.value })}
-          style={{ fontSize: 'max(16px, 0.9rem)' }} />
+          value={form.cardHolder} onChange={(e) => setForm({ ...form, cardHolder: e.target.value })} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <div>
           <FieldLabel htmlFor={`${prefix}-expiry`}>Expiry</FieldLabel>
-          <input id={`${prefix}-expiry`} className="input-field" placeholder="MM/YY"
-            value={form.expiry} onChange={(e) => setForm({ ...form, expiry: e.target.value })}
-            style={{ fontSize: 'max(16px, 0.9rem)' }} />
+          <input id={`${prefix}-expiry`} className="input-field" placeholder="MM / YY"
+            value={form.expiry} onChange={(e) => setForm({ ...form, expiry: e.target.value })} />
         </div>
         <div>
           <FieldLabel htmlFor={`${prefix}-cvv`}>CVV</FieldLabel>
           <input id={`${prefix}-cvv`} className="input-field" placeholder="•••" type="password"
-            value={form.cvv} onChange={(e) => setForm({ ...form, cvv: e.target.value })}
-            style={{ fontSize: 'max(16px, 0.9rem)' }} />
+            value={form.cvv} onChange={(e) => setForm({ ...form, cvv: e.target.value })} />
         </div>
       </div>
     </div>
   );
 }
 
+/* Identity form fields */
 function IdentityFormFields({ form, setForm, prefix }: Readonly<{ form: any; setForm: (f: any) => void; prefix: string }>) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <div>
           <FieldLabel htmlFor={`${prefix}-first-name`}>First Name</FieldLabel>
           <input id={`${prefix}-first-name`} className="input-field" placeholder="Jane"
-            value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-            style={{ fontSize: 'max(16px, 0.9rem)' }} />
+            value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
         </div>
         <div>
           <FieldLabel htmlFor={`${prefix}-last-name`}>Last Name</FieldLabel>
           <input id={`${prefix}-last-name`} className="input-field" placeholder="Smith"
-            value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-            style={{ fontSize: 'max(16px, 0.9rem)' }} />
+            value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
         </div>
       </div>
       <div>
         <FieldLabel htmlFor={`${prefix}-phone`}>Phone</FieldLabel>
         <input id={`${prefix}-phone`} className="input-field" placeholder="+1 555 000 0000"
-          value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-          style={{ fontSize: 'max(16px, 0.9rem)' }} />
+          value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
       </div>
       <div>
         <FieldLabel htmlFor={`${prefix}-address`}>Address</FieldLabel>
         <input id={`${prefix}-address`} className="input-field" placeholder="123 Main St, City"
-          value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
-          style={{ fontSize: 'max(16px, 0.9rem)' }} />
+          value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
       </div>
     </div>
   );
 }
 
+/* Shared form body */
 export function ItemFormBody({
   form, setForm, genOptions, submitLabel, submitting, onClose,
 }: Readonly<{
@@ -304,7 +332,7 @@ export function ItemFormBody({
   submitLabel: string; submitting: boolean; onClose: () => void;
 }>) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div>
         <FieldLabel htmlFor="form-name">Name *</FieldLabel>
         <input
@@ -312,7 +340,6 @@ export function ItemFormBody({
           placeholder="e.g. GitHub, Netflix…"
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
-          style={{ fontSize: 'max(16px, 0.9rem)' }}
         />
       </div>
 
@@ -321,7 +348,7 @@ export function ItemFormBody({
         <CategoryPicker value={form.category} onChange={(v) => setForm({ ...form, category: v })} />
       </div>
 
-      <div style={{ height: 1, background: 'var(--border)' }} />
+      <div className="hairline" />
 
       {form.category === 'login' && <LoginFormFields form={form} setForm={setForm} genOptions={genOptions} />}
       {form.category === 'card' && <CardFormFields form={form} setForm={setForm} prefix="form" />}
@@ -334,18 +361,19 @@ export function ItemFormBody({
           placeholder="Any additional notes…"
           value={form.notes}
           onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          style={{ resize: 'vertical', fontSize: 'max(16px, 0.9rem)' }}
+          style={{ resize: 'vertical', lineHeight: 1.6 }}
         />
       </div>
 
-      <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
-        <button type="button" className="btn-ghost" onClick={onClose} style={{ flex: 1, minHeight: 46 }}>
+      <div style={{ display: 'flex', gap: 8, paddingTop: 2 }}>
+        <button type="button" className="btn-ghost" onClick={onClose} style={{ flex: 1, minHeight: 44 }}>
           Cancel
         </button>
         <button
-          type="submit" className="btn-primary"
+          type="submit"
+          className="btn-primary"
           disabled={submitting}
-          style={{ flex: 2, minHeight: 46, opacity: submitting ? 0.6 : 1, cursor: submitting ? 'not-allowed' : 'pointer' }}
+          style={{ flex: 2, minHeight: 44 }}
         >
           {submitting ? 'Saving…' : submitLabel}
         </button>
@@ -354,12 +382,13 @@ export function ItemFormBody({
   );
 }
 
+/* Modal exports */
 export function AddItemModal({ newItem, setNewItem, savingItem, genOptions, onSubmit, onClose }: Readonly<{
   newItem: any; setNewItem: (f: any) => void; savingItem: boolean; genOptions: any;
   onSubmit: (e: React.SyntheticEvent) => void; onClose: () => void;
 }>) {
   return (
-    <Modal onClose={onClose} title="Add Item" icon={<Plus size={16} color="var(--accent)" />}>
+    <Modal onClose={onClose} title="Add Item" icon={<Plus size={14} color="var(--accent)" />}>
       <form onSubmit={onSubmit} autoComplete="off">
         <ItemFormBody
           form={newItem} setForm={setNewItem} genOptions={genOptions}
@@ -375,7 +404,7 @@ export function EditItemModal({ editForm, setEditForm, updatingItem, genOptions,
   onSubmit: (e: React.SyntheticEvent) => void; onClose: () => void;
 }>) {
   return (
-    <Modal onClose={onClose} title="Edit Item" icon={<Edit2 size={16} color="var(--accent)" />}>
+    <Modal onClose={onClose} title="Edit Item" icon={<Edit2 size={14} color="var(--accent)" />}>
       <form onSubmit={onSubmit} autoComplete="off">
         <ItemFormBody
           form={editForm} setForm={setEditForm} genOptions={genOptions}
