@@ -5,14 +5,14 @@ import { useSignOut } from './Sidebar';
 interface Props {
     user: any;
     masterPassword: string;
-    setMasterPassword: (v: string) => void;
+    onMasterPasswordChange: React.ChangeEventHandler<HTMLInputElement>;
     unlocking: boolean;
     unlockVault: (e: React.SyntheticEvent) => void;
     handleLogout: () => Promise<void>;
 }
 
 export function LockedVaultScreen({
-    user, masterPassword, setMasterPassword,
+    user, masterPassword, onMasterPasswordChange,
     unlocking, unlockVault, handleLogout,
 }: Readonly<Props>) {
     const { signingOut, handleSignout } = useSignOut(handleLogout);
@@ -61,7 +61,7 @@ export function LockedVaultScreen({
                             className="input-field" type="password"
                             placeholder="Master password" required autoFocus
                             value={masterPassword}
-                            onChange={e => setMasterPassword(e.target.value)}
+                            onChange={onMasterPasswordChange}
                         />
                         <button className="btn-primary" type="submit" disabled={unlocking} style={{ width: '100%', minHeight: 46 }}>
                             {unlocking ? 'Unlocking…' : 'Unlock Vault'}
