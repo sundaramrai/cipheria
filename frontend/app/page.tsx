@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { Shield, Lock, Zap, Globe, Key, ArrowRight, RefreshCw, Download } from 'lucide-react';
 
-export default function LandingPage() {
+export default function Page() {
   return (
     <main style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', background: 'var(--bg)', position: 'relative' }}>
 
