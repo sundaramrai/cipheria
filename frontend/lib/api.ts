@@ -9,14 +9,19 @@ let _accessToken: string | null = null;
 export const setAccessToken = (token: string | null) => { _accessToken = token; };
 export const getAccessToken = () => _accessToken;
 
-// Refresh mutex — ensures only one refresh call is in-flight at a time.
-// All concurrent 401 retries await the same promise and reuse the new token.
+/**
+ * Refresh mutex — ensures only one refresh call is in-flight at a time.
+ * All concurrent 401 retries await the same promise and reuse the new token.
+ * The promise is cleared AFTER it settles so late concurrent callers still
+ * receive the resolved token rather than racing to start a new refresh.
+ */
 let _refreshPromise: Promise<string> | null = null;
 
 export const api = axios.create({
   baseURL: API_URL,
+  timeout: 15_000,
   headers: { 'Content-Type': 'application/json' },
-  withCredentials: true,  // send HttpOnly refresh-token cookie automatically
+  withCredentials: true, // send HttpOnly refresh-token cookie automatically
 });
 
 // Attach access token to every request
@@ -37,17 +42,19 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !original._retry && !isRefreshCall) {
       original._retry = true;
       try {
-        // If a refresh is already in-flight, reuse that promise instead of
-        // firing a second one (which would hit a rotated/revoked token).
-        _refreshPromise ??= axios
-          .post(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true })
-          .then(({ data }) => {
-            setAccessToken(data.access_token);
-            return data.access_token as string;
-          })
-          .finally(() => {
-            _refreshPromise = null;
-          });
+        if (!_refreshPromise) {
+          // Start a new refresh and clear the mutex only after all awaiting
+          // callers have received the token (i.e. after the microtask queue drains).
+          const promise = axios
+            .post(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true })
+            .then(({ data }) => {
+              setAccessToken(data.access_token);
+              return data.access_token as string;
+            });
+          _refreshPromise = promise;
+          // Clear after current tick so concurrent callers still hit the same promise
+          promise.finally(() => { _refreshPromise = null; });
+        }
         const newToken = await _refreshPromise;
         original.headers.Authorization = `Bearer ${newToken}`;
         return api(original);
