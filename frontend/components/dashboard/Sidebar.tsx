@@ -1,8 +1,8 @@
 'use client';
-import { useState, useCallback } from 'react';
 import { Key, Shield, Globe, CreditCard, StickyNote, User, Download, Lock, LogOut } from 'lucide-react';
-import { VaultItem } from '@/lib/store';
+import type { VaultItem } from '@/lib/types';
 import { Category } from './types';
+import { useSignOut } from './hooks/useSignOut';
 
 const NAV_ITEMS = [
   { id: 'all', label: 'All Items', icon: Shield },
@@ -15,16 +15,6 @@ const NAV_ITEMS = [
 const ELLIPSIS_STYLE = {
   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
 } as const;
-
-export function useSignOut(handleLogout: () => Promise<void>) {
-  const [signingOut, setSigningOut] = useState(false);
-  const handleSignout = useCallback(async () => {
-    setSigningOut(true);
-    try { await handleLogout(); }
-    finally { setSigningOut(false); }
-  }, [handleLogout]);
-  return { signingOut, handleSignout };
-}
 
 interface DesktopSidebarProps {
   user: any;
@@ -41,9 +31,12 @@ export function DesktopSidebar({ user, category, vaultItems, setCategory, handle
 
   return (
     <aside className="desktop-sidebar" style={{
-      width: 232, borderRight: '1px solid var(--border)',
+      flex: '0 1 18%',
+      minWidth: 220,
+      maxWidth: 300,
+      borderRight: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column',
-      padding: '20px 12px', flexShrink: 0,
+      padding: '20px 12px',
       background: 'var(--bg-card)', gap: 0,
     }}>
       {/* Logo */}
