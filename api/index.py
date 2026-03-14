@@ -58,7 +58,7 @@ _allowed_origins = [
 ]
 _allowed_origin_regex = os.getenv(
     "ALLOWED_ORIGIN_REGEX",
-    r"https://.*\.vercel\.app|chrome-extension://.*|moz-extension://.*",
+    r"^https://cipheria\.vercel\.app$|^chrome-extension://.*$|^moz-extension://.*$",
 )
 
 app.add_middleware(
