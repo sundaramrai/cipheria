@@ -1,13 +1,4 @@
-﻿from sqlalchemy import (
-    create_engine,
-    Column,
-    String,
-    Text,
-    Boolean,
-    Integer,
-    Index,
-    text,
-)
+﻿from sqlalchemy import ( create_engine, Column, String, Text, Boolean, Integer, Index, text )
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
 from sqlalchemy.types import TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID
@@ -18,8 +9,6 @@ import logging
 import uuid
 import os
 import re
-import ssl
-import certifi
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -31,21 +20,11 @@ def _build_database_url() -> str:
     return re.sub(r"^postgres(ql)?://", "postgresql+psycopg://", url)
 
 
-def _build_ssl_context():
-    if "neon.tech" not in os.getenv("DATABASE_URL", ""):
-        return None
-    ctx = ssl.create_default_context(cafile=certifi.where())
-    ctx.check_hostname = True
-    ctx.verify_mode = ssl.CERT_REQUIRED
-    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-    return ctx
-
-
-_ssl_ctx = _build_ssl_context()
-
+# NullPool is intentional for Vercel serverless — each request gets a fresh
+# connection rather than sharing a pool across short-lived function instances.
+# If you migrate to a persistent server, swap to QueuePool with pool_size=5.
 engine = create_engine(
     _build_database_url(),
-    connect_args={"sslmode": "require"} if _ssl_ctx else {},
     poolclass=NullPool,
     echo=False,
 )
@@ -160,4 +139,4 @@ def create_tables():
             )
             conn.commit()
     except Exception as e:
-        print(f"Warning: Could not create pg_trgm index: {e}")
+        logger.warning(f"Could not create pg_trgm index: {e}")
