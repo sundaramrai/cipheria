@@ -3,6 +3,7 @@ routes/auth.py — Auth routes with Redis cache integration.
 """
 
 import os
+import uuid
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
@@ -90,6 +91,16 @@ def _warm_caches(user: User, token_hash: str) -> None:
     cache_refresh_token_valid(token_hash, user_id, _RT_TTL_SECONDS)
 
 
+def _prune_revoked_tokens(db: Session, user_id) -> None:
+    """Delete revoked refresh tokens for a user to keep the table lean.
+    Called at login so the cleanup cost is amortised across natural usage.
+    """
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == user_id,
+        RefreshToken.revoked == True,
+    ).delete(synchronize_session=False)
+
+
 # Register
 
 @router.post(
@@ -171,6 +182,11 @@ def login(
         )
     )
     _log_action(db, user.id, "LOGIN", request)
+
+    # Prune stale revoked tokens to keep the refresh_tokens table lean.
+    # Done at login so cost is amortised — not on every request.
+    _prune_revoked_tokens(db, user.id)
+
     db.commit()
 
     _warm_caches(user, token_hash)
@@ -206,6 +222,14 @@ def refresh(
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
+    # Validate sub is a well-formed UUID — malformed values cause DB errors
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    try:
+        uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
     if is_token_blacklisted(jti):
         raise HTTPException(status_code=401, detail="Refresh token revoked")
 
@@ -213,9 +237,9 @@ def refresh(
     cached_rt = get_cached_refresh_token(token_hash)
 
     if cached_rt:
-        # Cache confirms this token is valid — skip the DB read entirely.
-        # The token is rotated (revoked in both cache + DB) immediately below,
-        # so there is no meaningful window for a stale cache to cause harm.
+        # Cache confirms this token is valid — skip the initial DB read.
+        # We still fetch the row below to mark it revoked, but that query
+        # runs after the cache is cleared so concurrent reuse is blocked.
         logger.debug(f"refresh token cache HIT user={user_id}")
         stored = None  # resolved lazily during rotation
     else:
@@ -232,10 +256,10 @@ def refresh(
         if not stored:
             raise HTTPException(status_code=401, detail="Refresh token expired or revoked")
 
-    # Revoke old token in cache immediately (blacklist the JTI)
-    revoke_refresh_token_cache(token_hash, jti, _RT_TTL_SECONDS)
-
-    # Mark old DB row as revoked — fetch it now if we skipped the MISS query
+    # Revocation order: DB first, then cache
+    # Persisting to DB first ensures the token is durably revoked even if the
+    # process crashes before the cache write. The reverse order would leave a
+    # permanently valid but un-rotatable token if the server dies mid-flight.
     if stored is None:
         stored = (
             db.query(RefreshToken)
@@ -247,7 +271,7 @@ def refresh(
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user or not user.is_active:
-        db.commit()  # persist revocation even if account is gone/disabled
+        db.commit()  # persist DB revocation even if account is gone/disabled
         raise HTTPException(status_code=401, detail="Account not found or disabled")
 
     new_access = create_access_token({"sub": user_id})
@@ -262,7 +286,9 @@ def refresh(
         )
     )
     _log_action(db, user_id, "TOKEN_REFRESH", request)
-    db.commit()
+    db.commit()  # old token revoked + new token persisted atomically
+    # Clear old token from cache only after DB commit succeeds
+    revoke_refresh_token_cache(token_hash, jti, _RT_TTL_SECONDS)
 
     _warm_caches(user, new_hash)
     _set_refresh_cookie(response, new_refresh)
@@ -299,8 +325,10 @@ def logout(
             invalidate_user(user_id)
             invalidate_all_vault(user_id)
             logger.info(f"LOGOUT user={user_id} — all caches purged")
-        except Exception:
-            pass  # malformed token — still clear the cookie
+        except Exception as exc:
+            # Malformed or expired token — still clear the cookie.
+            # Log so genuine errors (DB down, Redis down) are not silent.
+            logger.warning(f"LOGOUT cleanup error (non-fatal): {exc}")
 
     response.delete_cookie(
         key="refresh_token",
