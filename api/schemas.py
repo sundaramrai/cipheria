@@ -5,9 +5,8 @@ from uuid import UUID
 
 
 def _validate_favicon_url(v: Optional[str]) -> Optional[str]:
-    if v is not None:
-        if not (v.startswith("https://") or v.startswith("http://")):
-            raise ValueError("favicon_url must be a valid HTTP/S URL")
+    if v is not None and not v.startswith("https://"):
+        raise ValueError("favicon_url must be a valid HTTPS URL")
     return v
 
 
@@ -108,7 +107,7 @@ class VaultItemResponse(BaseModel):
 
 
 class PaginatedVaultResponse(BaseModel):
-    items: List[VaultItemResponse]
+    items: List[VaultItemSummary]
     total: int
     page: int
     page_size: int
