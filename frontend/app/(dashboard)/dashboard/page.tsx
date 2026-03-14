@@ -12,7 +12,7 @@ import { LockedVaultScreen } from '../../../components/dashboard/LockedVaultScre
 import { MainDashboard } from '../../../components/dashboard/MainDashboard';
 
 async function decryptSearchItem(item: VaultItem, key: CryptoKey, storeItems: VaultItem[]): Promise<VaultItem> {
-  const cached = storeItems.find((v) => v.id === item.id);
+  const cached = storeItems.find(v => v.id === item.id);
   if (cached?.decrypted) return cached;
   if (!item.encrypted_data) return item;
   try {
@@ -22,7 +22,7 @@ async function decryptSearchItem(item: VaultItem, key: CryptoKey, storeItems: Va
   }
 }
 
-// # vault unlock hook
+// vault unlock hook
 function useVaultUnlock(
   user: any,
   setVaultKey: (k: CryptoKey) => void,
@@ -32,7 +32,6 @@ function useVaultUnlock(
 ) {
   const [masterPassword, setMasterPassword] = useState('');
   const [unlocking, setUnlocking] = useState(false);
-  const [signout, setSignout] = useState(false);
   const unlockVault = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     setUnlocking(true);
@@ -47,12 +46,14 @@ function useVaultUnlock(
           const { data: listResult } = await vaultApi.list({ page_size: 50 });
           const items: VaultItem[] = listResult.items;
           if (items.length > 0) {
-            try {
-              // items[0].encrypted_data is always present — list endpoint includes it
-              await decryptData(items[0].encrypted_data!, key);
-            } catch (verifyErr) {
-              console.error('[unlock] Key verification failed:', verifyErr);
-              throw new Error('WRONG_PASSWORD');
+            const firstEncrypted = items[0].encrypted_data;
+            if (firstEncrypted) {
+              try {
+                await decryptData(firstEncrypted, key);
+              } catch (verifyErr) {
+                console.error('[unlock] Key verification failed:', verifyErr);
+                throw new Error('WRONG_PASSWORD');
+              }
             }
           }
           setVaultKey(key);
@@ -61,8 +62,7 @@ function useVaultUnlock(
             items.map(async (item) => {
               if (!item.encrypted_data) return item;
               try {
-                const dec = await decryptData(item.encrypted_data, key);
-                return { ...item, decrypted: dec };
+                return { ...item, decrypted: await decryptData(item.encrypted_data, key) };
               } catch {
                 return item;
               }
@@ -87,10 +87,10 @@ function useVaultUnlock(
       setUnlocking(false);
     }
   };
-  return { masterPassword, setMasterPassword, unlocking, signout, setSignout, unlockVault };
+  return { masterPassword, setMasterPassword, unlocking, unlockVault };
 }
 
-export default function Dashboard() {
+export default function Page() {
   const router = useRouter();
   const {
     user, cryptoKey, isAuthenticated, vaultItems, isVaultLocked,
@@ -120,19 +120,19 @@ export default function Dashboard() {
   const searchAbortRef = useRef<AbortController | null>(null);
   const decryptingItemIds = useRef(new Set<string>());
   const currentSelectionRef = useRef<string | null>(null);
-  const { masterPassword, setMasterPassword, unlocking, signout, setSignout, unlockVault } =
+  const { masterPassword, setMasterPassword, unlocking, unlockVault } =
     useVaultUnlock(user, setVaultKey, setVaultItems, setTotalPages, setTotalItems);
 
-  // # session restore
+  // session restore
   useEffect(() => {
     if (isAuthenticated) { setSessionLoading(false); return; }
-    restoreSession().then((ok) => {
+    restoreSession().then(ok => {
       if (ok) { setSessionLoading(false); return; }
       router.push('/auth');
     });
   }, []);
 
-  // # idle auto-lock
+  // idle auto-lock
   useEffect(() => {
     if (isVaultLocked) return;
     const reset = () => {
@@ -143,15 +143,15 @@ export default function Dashboard() {
       }, IDLE_MS);
     };
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'] as const;
-    events.forEach((e) => globalThis.addEventListener(e, reset, { passive: true }));
+    events.forEach(e => globalThis.addEventListener(e, reset, { passive: true }));
     reset();
     return () => {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-      events.forEach((e) => globalThis.removeEventListener(e, reset));
+      events.forEach(e => globalThis.removeEventListener(e, reset));
     };
   }, [isVaultLocked]);
 
-  // # clear state on vault lock
+  // Clear state on vault lock
   useEffect(() => {
     if (isVaultLocked) {
       setSearch('');
@@ -161,21 +161,33 @@ export default function Dashboard() {
     }
   }, [isVaultLocked]);
 
-  const handleLogout = async () => {
+  const buildEncryptedPayload = useCallback(async (form: typeof emptyForm) => {
+    if (!cryptoKey) throw new Error('Crypto key not available');
+    const payload = buildPayload(form);
+    const encrypted_data = await encryptData(payload, cryptoKey);
+    return { payload, encrypted_data };
+  }, [cryptoKey]);
+
+  const handleLogout = useCallback(async () => {
     try { await authApi.logout(); } catch { }
     logout();
     router.push('/auth');
-  };
+  }, [logout, router]);
 
-  // # item selection and decryption
+  const handleMasterPasswordChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => setMasterPassword(e.target.value),
+    [setMasterPassword],
+  );
+
+  // Item selection + decryption
   const handleSelectItem = useCallback(async (item: VaultItem) => {
     setSelectedItem(item);
     setHibp({ checking: false, count: null });
     currentSelectionRef.current = item.id;
     const { vaultItems: storeItems, cryptoKey: liveKey } = useAuthStore.getState();
-    const cached = storeItems.find((v) => v.id === item.id);
+    const cached = storeItems.find(v => v.id === item.id);
     if (cached?.decrypted) { setSelectedItem(cached); return; }
-    if (item.decrypted) return;  // already decrypted (e.g. from search results)
+    if (item.decrypted) return;
     if (!liveKey) return;
     if (decryptingItemIds.current.has(item.id)) return;
     decryptingItemIds.current.add(item.id);
@@ -192,13 +204,12 @@ export default function Dashboard() {
     }
   }, []);
 
-  // # debounced search
+  // Debounced search
   const handleSearchChange = useCallback((val: string) => {
     setSearch(val);
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchAbortRef.current?.abort();
     if (!val) { setSearchResults(null); setSearchLoading(false); setPage(1); return; }
-    // Skip API call if the vault is known to have no items at all
     if (totalItems === 0) { setSearchResults([]); return; }
     searchDebounceRef.current = setTimeout(async () => {
       setSearchLoading(true);
@@ -221,16 +232,9 @@ export default function Dashboard() {
         setSearchLoading(false);
       }
     }, 300);
-  }, []);
+  }, [totalItems]);
 
-  const buildEncryptedPayload = async (form: typeof emptyForm) => {
-    if (!cryptoKey) throw new Error('Crypto key not available');
-    const payload = buildPayload(form);
-    const encrypted_data = await encryptData(payload, cryptoKey);
-    return { payload, encrypted_data };
-  };
-
-  const handleAddItem = async (e: React.SyntheticEvent) => {
+  const handleAddItem = useCallback(async (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!cryptoKey) return;
     if (newItem.category === 'login' && newItem.url && !/^https?:\/\//i.exec(newItem.url)) {
@@ -253,7 +257,7 @@ export default function Dashboard() {
         { fallbackError: 'Failed to save item' },
       );
     } finally { setSavingItem(false); }
-  };
+  }, [cryptoKey, newItem, addVaultItem, buildEncryptedPayload]);
 
   const handleOpenEdit = useCallback((item: VaultItem) => {
     const d = item.decrypted ?? {};
@@ -267,7 +271,7 @@ export default function Dashboard() {
     setShowEditModal(true);
   }, []);
 
-  const handleEditItem = async (e: React.SyntheticEvent) => {
+  const handleEditItem = useCallback(async (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!cryptoKey || !editForm || !selectedItem) return;
     if (editForm.category === 'login' && editForm.url && !/^https?:\/\//i.exec(editForm.url)) {
@@ -294,9 +298,9 @@ export default function Dashboard() {
         { fallbackError: 'Failed to update item' },
       );
     } finally { setUpdatingItem(false); }
-  };
+  }, [cryptoKey, editForm, selectedItem, updateVaultItem, buildEncryptedPayload]);
 
-  const handleDelete = async (id: string, onAfterDelete?: () => void) => {
+  const handleDelete = useCallback(async (id: string, onAfterDelete?: () => void) => {
     if (deletingId) return;
     setDeletingId(id);
     try {
@@ -314,9 +318,9 @@ export default function Dashboard() {
         { fallbackError: 'Failed to delete' },
       );
     } finally { setDeletingId(null); }
-  };
+  }, [deletingId, selectedItem, removeVaultItem]);
 
-  const handleToggleFav = async (item: VaultItem) => {
+  const handleToggleFav = useCallback(async (item: VaultItem) => {
     const adding = !item.is_favourite;
     await toastService.withProgress(
       adding ? 'Adding to favourites...' : 'Removing from favourites...',
@@ -329,15 +333,15 @@ export default function Dashboard() {
       adding ? 'Added to favourites' : 'Removed from favourites',
       { fallbackError: 'Failed to update favourite' },
     );
-  };
+  }, [selectedItem, updateVaultItem]);
 
-  const copyToClipboard = (text: string, label: string) => {
+  const copyToClipboard = useCallback((text: string, label: string) => {
     navigator.clipboard.writeText(text);
     toastService.success(`${label} copied!`);
     setTimeout(() => navigator.clipboard.writeText(''), 30000);
-  };
+  }, []);
 
-  const handleExport = async () => {
+  const handleExport = useCallback(async () => {
     await toastService.withProgress(
       'Exporting vault...',
       async () => {
@@ -350,7 +354,7 @@ export default function Dashboard() {
       'Vault exported',
       { fallbackError: 'Export failed' },
     );
-  };
+  }, []);
 
   const handlePageChange = useCallback(async (newPage: number) => {
     try {
@@ -360,8 +364,7 @@ export default function Dashboard() {
         ? await Promise.all(
           data.items.map(async (item: any) => {
             try {
-              const dec = await decryptData(item.encrypted_data, key);
-              return { ...item, decrypted: dec };
+              return { ...item, decrypted: await decryptData(item.encrypted_data, key) };
             } catch {
               return item;
             }
@@ -380,32 +383,26 @@ export default function Dashboard() {
   }, [setVaultItems]);
 
   const filteredItems = useMemo(
-    () => (searchResults ?? vaultItems).filter((item) => category === 'all' || item.category === category),
+    () => (searchResults ?? vaultItems).filter(item => category === 'all' || item.category === category),
     [searchResults, vaultItems, category],
   );
 
-  if (sessionLoading) {
-    return (
-      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-        <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Loading...</div>
-      </div>
-    );
-  }
+  if (sessionLoading) return (
+    <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+      <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Loading...</div>
+    </div>
+  );
 
-  if (isVaultLocked) {
-    return (
-      <LockedVaultScreen
-        user={user}
-        masterPassword={masterPassword}
-        setMasterPassword={setMasterPassword}
-        unlocking={unlocking}
-        signout={signout}
-        setSignout={setSignout}
-        unlockVault={unlockVault}
-        handleLogout={handleLogout}
-      />
-    );
-  }
+  if (isVaultLocked) return (
+    <LockedVaultScreen
+      user={user}
+      masterPassword={masterPassword}
+      onMasterPasswordChange={handleMasterPasswordChange}
+      unlocking={unlocking}
+      unlockVault={unlockVault}
+      handleLogout={handleLogout}
+    />
+  );
 
   return (
     <MainDashboard
