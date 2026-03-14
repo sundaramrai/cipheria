@@ -250,7 +250,7 @@ function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, handleTo
     );
 
     return (
-        <div className="animate-fade-up" style={isMobile ? undefined : { maxWidth: 560 }}>
+        <div className="animate-fade-up" style={isMobile ? undefined : { width: '100%', maxWidth: 720 }}>
             <ItemDetailHeader
                 item={selectedItem} isMobile={isMobile}
                 handleToggleFav={handleToggleFav} handleOpenEdit={handleOpenEdit}
@@ -399,7 +399,14 @@ export function MainDashboard(props: Readonly<any>) {
                 lockVault={lockVault} handleLogout={handleLogout}
             />
 
-            <div className="desktop-list-col" style={{ width: 320, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+            <div className="desktop-list-col" style={{
+                flex: '0 1 24%',
+                minWidth: 280,
+                maxWidth: 420,
+                borderRight: '1px solid var(--border)',
+                display: 'flex',
+                flexDirection: 'column',
+            }}>
                 <div style={{ padding: '20px 16px', borderBottom: '1px solid var(--border)' }}>
                     <div style={{ position: 'relative', marginBottom: 12 }}>
                         <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
@@ -418,7 +425,7 @@ export function MainDashboard(props: Readonly<any>) {
                 {!isSearchActive && <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />}
             </div>
 
-            <div className="desktop-detail-col" style={{ flex: 1, overflowY: 'auto', padding: 32 }}>
+            <div className="desktop-detail-col" style={{ flex: '1 1 0', minWidth: 0, overflowY: 'auto', padding: 32 }}>
                 <ItemDetailPanel {...detailPanelProps} handleDelete={handleDelete} />
             </div>
 
