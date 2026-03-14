@@ -1,13 +1,14 @@
 import sys
 import os
+import logging
 
 sys.path.insert(0, os.path.dirname(__file__))
+logger = logging.getLogger("cipheria.api")
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -23,14 +24,14 @@ async def lifespan(app: FastAPI):
         try:
             create_tables()
         except Exception as e:
-            print(f"Warning: Could not create tables: {e}")
+            logger.warning(f"Could not create tables: {e}")
 
     from cache import cache_ping, get_redis
     if get_redis():
         ok = cache_ping()
-        print(f"Redis cache: {'connected' if ok else 'ping failed — degraded mode'}")
+        logger.info(f"Redis cache: {'connected' if ok else 'ping failed — degraded mode'}")
     else:
-        print("Redis cache: not configured — all requests will hit DB")
+        logger.info("Redis cache: not configured — all requests will hit DB")
 
     yield
 
