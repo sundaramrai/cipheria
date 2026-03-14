@@ -331,6 +331,10 @@ export function ItemFormBody({
   form: any; setForm: (f: any) => void; genOptions: any;
   submitLabel: string; submitting: boolean; onClose: () => void;
 }>) {
+  const handleCategoryChange = React.useCallback((v: string): void => {
+    setForm({ ...form, category: v });
+  }, [form, setForm]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div>
@@ -345,7 +349,7 @@ export function ItemFormBody({
 
       <div>
         <FieldLabel htmlFor="form-category">Category</FieldLabel>
-        <CategoryPicker value={form.category} onChange={(v) => setForm({ ...form, category: v })} />
+        <CategoryPicker value={form.category} onChange={handleCategoryChange} />
       </div>
 
       <div className="hairline" />
