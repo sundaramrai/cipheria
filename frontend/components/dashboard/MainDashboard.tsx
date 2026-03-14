@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Search, Plus, Shield, Globe, CreditCard, StickyNote, User, Trash2, Download, Star, Edit2, ChevronRight } from 'lucide-react';
 import { checkHIBP } from '@/lib/crypto';
 import { Category, CATEGORY_ICONS } from './types';
@@ -15,6 +15,8 @@ const CATEGORIES = [
     { id: 'note', label: 'Notes', icon: StickyNote },
     { id: 'identity', label: 'Identities', icon: User },
 ] as const;
+
+const ELLIPSIS_STYLE = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const;
 
 function SearchSkeleton({ iconSize = 36 }: Readonly<{ iconSize?: number }>) {
     return (
@@ -42,11 +44,10 @@ function ItemIcon({ item, size }: Readonly<{ item: any; size: number }>) {
     return (
         <div style={{
             width: size, height: size, borderRadius: size > 38 ? 10 : 8, flexShrink: 0,
-            background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', overflow: 'hidden',
+            background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
         }}>
             {item.favicon_url
-                ? <img src={item.favicon_url} alt="" width={px} height={px} onError={(e: any) => e.target.style.display = 'none'} />
+                ? <img src={item.favicon_url} alt="" width={px} height={px} onError={(e: any) => { e.target.style.display = 'none'; }} />
                 : <Icon size={px} color="var(--text-secondary)" />}
         </div>
     );
@@ -62,6 +63,7 @@ function ItemList({ items, loading, selectedId, onSelect, variant }: Readonly<{
     const isMobile = variant === 'mobile';
     const iconSize = isMobile ? 40 : 36;
     const padding = isMobile ? '14px 12px' : '12px';
+    const fontSize = isMobile ? '0.9rem' : '0.875rem';
 
     if (loading) return <SearchSkeleton iconSize={iconSize} />;
     if (!items.length) return (
@@ -73,28 +75,35 @@ function ItemList({ items, loading, selectedId, onSelect, variant }: Readonly<{
 
     return (
         <>
-            {items.map(item => (
-                <button key={item.id} onClick={() => onSelect(item)} style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-                    borderRadius: 10, border: 'none', cursor: 'pointer', marginBottom: 2,
-                    background: !isMobile && selectedId === item.id ? 'var(--accent-dim)' : 'transparent',
-                    borderLeft: !isMobile && selectedId === item.id ? '2px solid var(--accent)' : '2px solid transparent',
-                    transition: 'all 0.15s',
-                    padding,
-                }}>
-                    <ItemIcon item={item} size={iconSize} />
-                    <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
-                        <p style={{ fontSize: isMobile ? '0.9rem' : '0.875rem', color: 'var(--text-primary)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {item.name}
-                        </p>
-                        <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {item.decrypted?.username || item.decrypted?.url || item.category}
-                        </p>
-                    </div>
-                    {item.is_favourite && <Star size={isMobile ? 14 : 12} color="var(--accent)" fill="var(--accent)" />}
-                    {isMobile && <ChevronRight size={16} color="var(--text-secondary)" style={{ opacity: 0.4 }} />}
-                </button>
-            ))}
+            {items.map(item => {
+                const isSelected = !isMobile && selectedId === item.id;
+                return (
+                    <button key={item.id} onClick={() => onSelect(item)} style={{
+                        width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                        borderRadius: 10, border: 'none', cursor: 'pointer', marginBottom: 2,
+                        background: isSelected ? 'var(--accent-dim)' : 'transparent',
+                        borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
+                        transition: 'all 0.15s',
+                        padding,
+                    }}>
+                        <ItemIcon item={item} size={iconSize} />
+                        <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+                            <p style={{ fontSize, color: 'var(--text-primary)', fontWeight: 500, ...ELLIPSIS_STYLE }}>
+                                {item.name}
+                            </p>
+                            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', ...ELLIPSIS_STYLE }}>
+                                {item.decrypted?.username || item.decrypted?.url || item.category}
+                            </p>
+                        </div>
+                        {item.is_favourite && (
+                            <Star size={isMobile ? 14 : 12} color="var(--accent)" fill="var(--accent)" />
+                        )}
+                        {isMobile && (
+                            <ChevronRight size={16} color="var(--text-secondary)" style={{ opacity: 0.4 }} />
+                        )}
+                    </button>
+                );
+            })}
         </>
     );
 }
@@ -106,7 +115,10 @@ function ItemDetailFields({ selectedItem, copyToClipboard, hibp, setHibp }: Read
     setHibp: (v: { checking: boolean; count: number | null }) => void;
 }>) {
     const d = selectedItem.decrypted;
-    const copy = (val: string, label: string) => () => copyToClipboard(val, label);
+    const copy = useMemo(
+        () => (val: string, label: string) => () => copyToClipboard(val, label),
+        [copyToClipboard],
+    );
 
     const handleCheckHibp = useCallback(async () => {
         setHibp({ checking: true, count: null });
@@ -145,7 +157,6 @@ function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, han
 }>) {
     const Icon = CATEGORY_ICONS[item.category] || Globe;
     const iconSize = isMobile ? 48 : 52;
-    const titleSize = isMobile ? 'clamp(1.25rem, 5vw, 1.75rem)' : '1.75rem';
     const btnPad = isMobile ? '8px 10px' : '8px 12px';
     const iconPx = isMobile ? 15 : 16;
 
@@ -162,7 +173,7 @@ function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, han
                         : <Icon size={iconSize - 26} color="var(--accent)" />}
                 </div>
                 <div>
-                    <h2 className="font-display" style={{ fontSize: titleSize, color: 'var(--text-primary)' }}>
+                    <h2 className="font-display" style={{ fontSize: isMobile ? 'clamp(1.25rem, 5vw, 1.75rem)' : '1.75rem', color: 'var(--text-primary)' }}>
                         {item.name}
                     </h2>
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'capitalize' }}>
@@ -180,12 +191,9 @@ function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, han
                 <button onClick={() => handleOpenEdit(item)} className="btn-ghost" style={{ padding: btnPad }}>
                     <Edit2 size={iconPx} />
                 </button>
-                <button
-                    onClick={() => handleDelete(item.id)}
-                    className="btn-ghost"
+                <button onClick={() => handleDelete(item.id)} className="btn-ghost"
                     disabled={deletingId === item.id}
-                    style={{ padding: btnPad, color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.2)', opacity: deletingId === item.id ? 0.5 : 1 }}
-                >
+                    style={{ padding: btnPad, color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.2)', opacity: deletingId === item.id ? 0.5 : 1 }}>
                     <Trash2 size={iconPx} />
                 </button>
             </div>
@@ -193,7 +201,7 @@ function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, han
     );
 }
 
-function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, ...actions }: Readonly<{
+interface ItemDetailPanelProps {
     selectedItem: any;
     selectedItemLoading: boolean;
     isMobile?: boolean;
@@ -205,9 +213,9 @@ function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, ...actio
     hibp: { checking: boolean; count: number | null };
     setHibp: (v: { checking: boolean; count: number | null }) => void;
     onDeleteSuccess?: () => void;
-}>) {
-    const { handleToggleFav, handleOpenEdit, handleDelete, deletingId,
-        copyToClipboard, hibp, setHibp } = actions;
+}
+
+function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, handleToggleFav, handleOpenEdit, handleDelete, deletingId, copyToClipboard, hibp, setHibp }: Readonly<ItemDetailPanelProps>) {
 
     if (!selectedItem) return (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12, opacity: 0.4 }}>
@@ -265,9 +273,8 @@ export function MainDashboard(props: Readonly<any>) {
     const handleMobileBack = useCallback(() => setMobilePanel('list'), []);
     const handleAddClose = useCallback(() => setShowAddModal(false), [setShowAddModal]);
     const handleEditClose = useCallback(() => { setShowEditModal(false); setEditForm(null); }, [setShowEditModal, setEditForm]);
-    const handleDeleteMobile = useCallback((id: string, cb?: () => void) => handleDelete(id, cb), [handleDelete]);
 
-    const sharedDetailProps = {
+    const detailPanelProps: Omit<ItemDetailPanelProps, 'isMobile' | 'handleDelete' | 'onDeleteSuccess'> = {
         selectedItem, selectedItemLoading,
         handleToggleFav, handleOpenEdit, deletingId, copyToClipboard, hibp, setHibp,
     };
@@ -283,23 +290,23 @@ export function MainDashboard(props: Readonly<any>) {
             />
 
             <style>{`
-        @media (max-width: 768px) {
-          .desktop-sidebar,.desktop-list-col,.desktop-detail-col { display:none !important; }
-          .mobile-topbar { display:flex !important; }
-        }
-        @media (min-width: 769px) {
-          .mobile-topbar,.mobile-list-panel,.mobile-detail-panel { display:none !important; }
-          .desktop-sidebar { display:flex !important; }
-          .desktop-list-col,.desktop-detail-col { display:block !important; }
-        }
-        @keyframes shimmer {
-          0%,100% { opacity:0.45; }
-          50%      { opacity:0.85; }
-        }
-        .search-skeleton-item { animation: shimmer 1.3s ease-in-out infinite; }
-      `}</style>
+                @media (max-width: 768px) {
+                    .desktop-sidebar, .desktop-list-col, .desktop-detail-col { display: none !important; }
+                    .mobile-topbar { display: flex !important; }
+                }
+                @media (min-width: 769px) {
+                    .mobile-topbar, .mobile-list-panel, .mobile-detail-panel { display: none !important; }
+                    .desktop-sidebar { display: flex !important; }
+                    .desktop-list-col, .desktop-detail-col { display: block !important; }
+                }
+                @keyframes shimmer {
+                    0%, 100% { opacity: 0.45; }
+                    50%      { opacity: 0.85; }
+                }
+                .search-skeleton-item { animation: shimmer 1.3s ease-in-out infinite; }
+            `}</style>
 
-            {/* ── Mobile: list panel ── */}
+            {/* Mobile: list panel */}
             <div className="mobile-list-panel" style={{
                 display: mobilePanel === 'list' ? 'flex' : 'none',
                 position: 'fixed', inset: 0, zIndex: 10,
@@ -345,13 +352,13 @@ export function MainDashboard(props: Readonly<any>) {
                     <button onClick={handleExport} className="btn-ghost" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', fontSize: '0.8rem' }}>
                         <Download size={14} /> Export
                     </button>
-                    <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', padding: '0 8px', opacity: 0.6, flex: 1, justifyContent: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', padding: '0 8px', opacity: 0.6, flex: 1, justifyContent: 'center', ...ELLIPSIS_STYLE }}>
                         {user?.email}
                     </p>
                 </div>
             </div>
 
-            {/* ── Mobile: detail panel ── */}
+            {/* Mobile: detail panel */}
             <div className="mobile-detail-panel" style={{
                 display: mobilePanel === 'detail' ? 'flex' : 'none',
                 position: 'fixed', inset: 0, zIndex: 10,
@@ -359,15 +366,15 @@ export function MainDashboard(props: Readonly<any>) {
             }}>
                 <div style={{ padding: '24px 16px', flex: 1 }}>
                     <ItemDetailPanel
-                        {...sharedDetailProps}
+                        {...detailPanelProps}
                         isMobile
-                        handleDelete={handleDeleteMobile}
+                        handleDelete={handleDelete}
                         onDeleteSuccess={handleMobileBack}
                     />
                 </div>
             </div>
 
-            {/* ── Desktop layout ── */}
+            {/* Desktop layout */}
             <DesktopSidebar
                 user={user} category={category} vaultItems={vaultItems}
                 setCategory={props.setCategory} handleExport={handleExport}
@@ -394,10 +401,7 @@ export function MainDashboard(props: Readonly<any>) {
             </div>
 
             <div className="desktop-detail-col" style={{ flex: 1, overflowY: 'auto', padding: 32 }}>
-                <ItemDetailPanel
-                    {...sharedDetailProps}
-                    handleDelete={handleDelete}
-                />
+                <ItemDetailPanel {...detailPanelProps} handleDelete={handleDelete} />
             </div>
 
             {showAddModal && (
