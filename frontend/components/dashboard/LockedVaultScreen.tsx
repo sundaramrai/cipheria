@@ -1,7 +1,6 @@
 'use client';
 import { Lock } from 'lucide-react';
-import { useSignOut } from './Sidebar';
-
+import { useSignOut } from './hooks/useSignOut';
 interface Props {
     user: any;
     masterPassword: string;
