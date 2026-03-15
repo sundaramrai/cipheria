@@ -112,10 +112,11 @@ def _vault_list_key(
     category: Optional[str],
     search: Optional[str],
     favourites_only: bool,
+    deleted_only: bool,
     page: int,
     page_size: int,
 ) -> str:
-    params = f"{category}:{search}:{favourites_only}:{page}:{page_size}"
+    params = f"{category}:{search}:{favourites_only}:{deleted_only}:{page}:{page_size}"
     params_hash = hashlib.md5(params.encode()).hexdigest()[:12]
     return f"vault:list:{user_id}:{params_hash}"
 
@@ -153,10 +154,11 @@ def get_cached_vault_list(
     category: Optional[str],
     search: Optional[str],
     favourites_only: bool,
+    deleted_only: bool,
     page: int,
     page_size: int,
 ) -> Optional[dict]:
-    key = _vault_list_key(user_id, category, search, favourites_only, page, page_size)
+    key = _vault_list_key(user_id, category, search, favourites_only, deleted_only, page, page_size)
     return _get(key)
 
 
@@ -165,11 +167,12 @@ def set_cached_vault_list(
     category: Optional[str],
     search: Optional[str],
     favourites_only: bool,
+    deleted_only: bool,
     page: int,
     page_size: int,
     data: dict,
 ) -> None:
-    key = _vault_list_key(user_id, category, search, favourites_only, page, page_size)
+    key = _vault_list_key(user_id, category, search, favourites_only, deleted_only, page, page_size)
     _set(key, data, TTL_VAULT_LIST)
 
 
