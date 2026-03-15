@@ -46,6 +46,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
+    email_verified = Column(Boolean, default=False)
     created_at = Column(
         TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -60,6 +61,9 @@ class User(Base):
     vault_salt = Column(
         String(64), nullable=False, default=lambda: uuid.uuid4().hex + uuid.uuid4().hex
     )
+    # Deterministic verifier derived client-side from the master password + salt.
+    # The server stores only this verifier, never the plaintext master password.
+    master_password_verifier = Column(String(64), nullable=True)
 
 
 class VaultItem(Base):
@@ -73,6 +77,8 @@ class VaultItem(Base):
     encrypted_data = Column(Text, nullable=False)
     favicon_url = Column(String(512), nullable=True)
     is_favourite = Column(Boolean, default=False)
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(
         TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -84,6 +90,7 @@ class VaultItem(Base):
 
     __table_args__ = (
         Index("ix_vault_items_user_updated", "user_id", "updated_at"),
+        Index("ix_vault_items_user_deleted", "user_id", "is_deleted"),
     )
 
 
@@ -111,6 +118,20 @@ class RefreshToken(Base):
         TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     revoked = Column(Boolean, default=False)
+
+
+class AuthToken(Base):
+    __tablename__ = "auth_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    token_hash = Column(String(255), nullable=False, unique=True, index=True)
+    purpose = Column(String(64), nullable=False, index=True)
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    consumed_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
 
 def get_db() -> Generator[Session, None, None]:
