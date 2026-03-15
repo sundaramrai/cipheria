@@ -1,5 +1,5 @@
 'use client';
-import { Key, Shield, Globe, CreditCard, StickyNote, User, Download, Lock, LogOut } from 'lucide-react';
+import { Archive, Key, Settings, Shield, Globe, CreditCard, StickyNote, User, Download, Lock, LogOut, Star } from 'lucide-react';
 import type { VaultItem } from '@/lib/types';
 import { Category } from './types';
 import { useSignOut } from './hooks/useSignOut';
@@ -20,13 +20,27 @@ interface DesktopSidebarProps {
   user: any;
   category: string;
   vaultItems: VaultItem[];
+  sidebarCounts: {
+    all: number;
+    login: number;
+    card: number;
+    note: number;
+    identity: number;
+    favourites: number;
+    trash: number;
+  };
   setCategory: (c: Category) => void;
   handleExport: () => void;
   lockVault: () => void;
   handleLogout: () => Promise<void>;
+  onOpenSettings: () => void;
+  onToggleFavourites: () => void;
+  onToggleTrash: () => void;
+  isFavouritesView: boolean;
+  isTrashView: boolean;
 }
 
-export function DesktopSidebar({ user, category, vaultItems, setCategory, handleExport, lockVault, handleLogout }: Readonly<DesktopSidebarProps>) {
+export function DesktopSidebar({ user, category, vaultItems, sidebarCounts, setCategory, handleExport, lockVault, handleLogout, onOpenSettings, onToggleFavourites, onToggleTrash, isFavouritesView, isTrashView }: Readonly<DesktopSidebarProps>) {
   const { signingOut, handleSignout } = useSignOut(handleLogout);
 
   return (
@@ -59,24 +73,35 @@ export function DesktopSidebar({ user, category, vaultItems, setCategory, handle
       {/* Nav */}
       <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
         {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
-          const count = id === 'all'
-            ? vaultItems.length
-            : vaultItems.filter((i: VaultItem) => i.category === id).length;
+          const count = sidebarCounts[id as keyof typeof sidebarCounts] ?? 0;
           return (
             <button key={id} onClick={() => setCategory(id as Category)}
-              className={`nav-item${category === id ? ' active' : ''}`}>
+              className={`nav-item${category === id && !isTrashView && !isFavouritesView ? ' active' : ''}`}>
               <Icon size={15} style={{ flexShrink: 0 }} />
               {label}
               <span className="count">{count}</span>
             </button>
           );
         })}
+        <button onClick={onToggleFavourites} className={`nav-item${isFavouritesView ? ' active' : ''}`}>
+          <Star size={15} style={{ flexShrink: 0 }} />
+          Favourites
+          <span className="count">{sidebarCounts.favourites}</span>
+        </button>
+        <button onClick={onToggleTrash} className={`nav-item${isTrashView ? ' active' : ''}`}>
+          <Archive size={15} style={{ flexShrink: 0 }} />
+          Trash
+          <span className="count">{sidebarCounts.trash}</span>
+        </button>
       </nav>
 
       {/* Footer */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 12 }}>
         <button onClick={handleExport} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
           <Download size={13} /> Export Vault
+        </button>
+        <button onClick={onOpenSettings} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
+          <Settings size={13} /> Settings
         </button>
         <button onClick={lockVault} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
           <Lock size={13} /> Lock Vault
@@ -101,9 +126,10 @@ interface MobileTopBarProps {
   onBack: () => void;
   lockVault: () => void;
   handleLogout: () => Promise<void>;
+  onOpenSettings: () => void;
 }
 
-export function MobileTopBar({ mobilePanel, selectedItem, onBack, lockVault, handleLogout }: Readonly<MobileTopBarProps>) {
+export function MobileTopBar({ mobilePanel, selectedItem, onBack, lockVault, handleLogout, onOpenSettings }: Readonly<MobileTopBarProps>) {
   const { signingOut, handleSignout } = useSignOut(handleLogout);
   const showBack = mobilePanel === 'detail' && selectedItem;
 
@@ -143,6 +169,9 @@ export function MobileTopBar({ mobilePanel, selectedItem, onBack, lockVault, han
 
       {/* Right: actions */}
       <div style={{ display: 'flex', gap: 4 }}>
+        <button onClick={onOpenSettings} className="btn-icon" title="Settings" style={{ width: 38, height: 38 }}>
+          <Settings size={17} />
+        </button>
         <button onClick={lockVault} className="btn-icon" title="Lock Vault" style={{ width: 38, height: 38 }}>
           <Lock size={17} />
         </button>
