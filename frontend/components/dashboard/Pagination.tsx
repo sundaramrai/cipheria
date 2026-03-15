@@ -33,7 +33,7 @@ function PageButton({ p, isActive, onPageChange }: Readonly<{
       style={{
         minWidth: 30, height: 30, borderRadius: 'var(--radius-sm)',
         border: '1px solid',
-        borderColor: isActive ? 'rgba(245,158,11,0.35)' : 'var(--border)',
+        borderColor: isActive ? 'var(--accent-border-focus)' : 'var(--border)',
         background: isActive ? 'var(--accent-dim)' : 'transparent',
         color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
         fontWeight: isActive ? 600 : 400,
