@@ -1,6 +1,6 @@
 'use client';
 import { useState, useCallback, useMemo } from 'react';
-import { Search, Plus, Shield, Globe, CreditCard, StickyNote, User, Trash2, Download, Star, Edit2, ChevronRight } from 'lucide-react';
+import { RotateCcw, Search, Plus, Shield, Globe, CreditCard, StickyNote, User, Trash2, Download, Star, Edit2, ChevronRight } from 'lucide-react';
 import { checkHIBP } from '@/lib/crypto';
 import { CATEGORY_ICONS } from './types';
 import { DesktopSidebar, MobileTopBar } from './Sidebar';
@@ -27,10 +27,10 @@ function SearchSkeleton({ iconSize = 36 }: Readonly<{ iconSize?: number }>) {
                     padding: 12, borderRadius: 10, marginBottom: 2,
                     animationDelay: `${i * 0.08}s`,
                 }}>
-                    <div style={{ width: iconSize, height: iconSize, borderRadius: 8, background: 'rgba(255,255,255,0.07)', flexShrink: 0 }} />
+                    <div style={{ width: iconSize, height: iconSize, borderRadius: 8, background: 'var(--skeleton-2)', flexShrink: 0 }} />
                     <div style={{ flex: 1 }}>
-                        <div style={{ height: 13, width: '55%', borderRadius: 6, background: 'rgba(255,255,255,0.07)', marginBottom: 7 }} />
-                        <div style={{ height: 11, width: '38%', borderRadius: 6, background: 'rgba(255,255,255,0.05)' }} />
+                        <div style={{ height: 13, width: '55%', borderRadius: 6, background: 'var(--skeleton-2)', marginBottom: 7 }} />
+                        <div style={{ height: 11, width: '38%', borderRadius: 6, background: 'var(--skeleton-1)' }} />
                     </div>
                 </div>
             ))}
@@ -44,7 +44,7 @@ function ItemIcon({ item, size }: Readonly<{ item: any; size: number }>) {
     return (
         <div style={{
             width: size, height: size, borderRadius: size > 38 ? 10 : 8, flexShrink: 0,
-            background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+            background: 'var(--skeleton-1)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
         }}>
             {item.favicon_url
                 ? <img src={item.favicon_url} alt="" width={px} height={px} onError={(e: any) => { e.target.style.display = 'none'; }} />
@@ -124,31 +124,19 @@ function ItemList({ items, loading, selectedId, onSelect, variant }: Readonly<{
     );
 }
 
-function ItemDetailFields({ selectedItem, copyToClipboard, hibp, setHibp }: Readonly<{
-    selectedItem: any;
-    copyToClipboard: (text: string, label: string) => void;
+function FieldRows({ d, copy, hibp, onCheckHibp }: Readonly<{
+    d: any;
+    copy: (val: string, label: string) => () => void;
     hibp: { checking: boolean; count: number | null };
-    setHibp: (v: { checking: boolean; count: number | null }) => void;
+    onCheckHibp: () => void;
 }>) {
-    const d = selectedItem.decrypted;
-    const copy = useMemo(
-        () => (val: string, label: string) => () => copyToClipboard(val, label),
-        [copyToClipboard],
-    );
-
-    const handleCheckHibp = useCallback(async () => {
-        setHibp({ checking: true, count: null });
-        try { setHibp({ checking: false, count: await checkHIBP(d.password) }); }
-        catch { setHibp({ checking: false, count: -1 }); }
-    }, [d.password, setHibp]);
-
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <>
             {d?.url && <Field label="URL" value={d.url} onCopy={copy(d.url, 'URL')} />}
             {d?.username && <Field label="Username / Email" value={d.username} onCopy={copy(d.username, 'Username')} />}
             {d?.password && <>
                 <Field label="Password" value={d.password} secret onCopy={copy(d.password, 'Password')} />
-                <HibpCheck hibp={hibp} onCheck={handleCheckHibp} />
+                <HibpCheck hibp={hibp} onCheck={onCheckHibp} />
             </>}
             {d?.cardNumber && <Field label="Card Number" value={d.cardNumber} secret onCopy={copy(d.cardNumber, 'Card number')} />}
             {d?.cardHolder && <Field label="Cardholder Name" value={d.cardHolder} onCopy={copy(d.cardHolder, 'Cardholder')} />}
@@ -159,16 +147,82 @@ function ItemDetailFields({ selectedItem, copyToClipboard, hibp, setHibp }: Read
             {d?.phone && <Field label="Phone" value={d.phone} onCopy={copy(d.phone, 'Phone')} />}
             {d?.address && <Field label="Address" value={d.address} multiline />}
             {d?.notes && <Field label="Notes" value={d.notes} multiline />}
+        </>
+    );
+}
+
+function ItemDetailFields({ selectedItem, copyToClipboard, hibp, setHibp }: Readonly<{
+    selectedItem: any;
+    copyToClipboard: (text: string, label: string) => void;
+    hibp: { checking: boolean; count: number | null };
+    setHibp: (v: { checking: boolean; count: number | null }) => void;
+}>) {
+    const d = selectedItem.decrypted ?? {};
+    const password = typeof d.password === 'string' ? d.password : '';
+    const copy = useMemo(
+        () => (val: string, label: string) => () => copyToClipboard(val, label),
+        [copyToClipboard],
+    );
+    const handleCheckHibp = useCallback(async () => {
+        if (!password) return;
+        setHibp({ checking: true, count: null });
+        try { setHibp({ checking: false, count: await checkHIBP(password) }); }
+        catch { setHibp({ checking: false, count: -1 }); }
+    }, [password, setHibp]);
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FieldRows d={d} copy={copy} hibp={hibp} onCheckHibp={handleCheckHibp} />
         </div>
     );
 }
 
-function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, handleDelete, deletingId }: Readonly<{
+function ItemDetailActions({ item, btnPad, iconPx, deletingId, onFav, onEdit, onDelete, onRestore, onDeletePermanent }: Readonly<{
+    item: any; btnPad: string; iconPx: number; deletingId: string | null;
+    onFav: () => void; onEdit: () => void; onDelete: () => void;
+    onRestore: () => void; onDeletePermanent: () => void;
+}>) {
+    const dangerStyle = { padding: btnPad, color: 'var(--danger)', borderColor: 'var(--danger-border-soft)', opacity: deletingId === item.id ? 0.5 : 1 };
+    return (
+        <div style={{ display: 'flex', gap: btnPad === '8px 10px' ? 4 : 8 }}>
+            {item.is_deleted ? (
+                <button onClick={onRestore} className="btn-ghost" style={{ padding: btnPad }}>
+                    <RotateCcw size={iconPx} />
+                </button>
+            ) : (
+                <>
+                    <button onClick={onFav} className="btn-ghost" style={{ padding: btnPad }}>
+                        <Star size={iconPx}
+                            color={item.is_favourite ? 'var(--accent)' : 'var(--text-secondary)'}
+                            fill={item.is_favourite ? 'var(--accent)' : 'none'} />
+                    </button>
+                    <button onClick={onEdit} className="btn-ghost" style={{ padding: btnPad }}>
+                        <Edit2 size={iconPx} />
+                    </button>
+                </>
+            )}
+            {!item.is_deleted && (
+                <button onClick={onDelete} className="btn-ghost" disabled={deletingId === item.id} style={dangerStyle}>
+                    <Trash2 size={iconPx} />
+                </button>
+            )}
+            {item.is_deleted && (
+                <button onClick={onDeletePermanent} className="btn-ghost" disabled={deletingId === item.id} style={dangerStyle}>
+                    <Trash2 size={iconPx} />
+                </button>
+            )}
+        </div>
+    );
+}
+
+function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, handleDelete, handleRestoreItem, handleDeletePermanent, deletingId }: Readonly<{
     item: any;
     isMobile?: boolean;
     handleToggleFav: (item: any) => void;
     handleOpenEdit: (item: any) => void;
     handleDelete: (id: string, cb?: () => void) => void;
+    handleRestoreItem?: (id: string) => void;
+    handleDeletePermanent?: (id: string) => void;
     deletingId: string | null;
 }>) {
     const Icon = CATEGORY_ICONS[item.category] || Globe;
@@ -178,6 +232,8 @@ function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, han
     const onFav = useCallback(() => handleToggleFav(item), [handleToggleFav, item]);
     const onEdit = useCallback(() => handleOpenEdit(item), [handleOpenEdit, item]);
     const onDelete = useCallback(() => handleDelete(item.id), [handleDelete, item.id]);
+    const onRestore = useCallback(() => handleRestoreItem?.(item.id), [handleRestoreItem, item.id]);
+    const onDeletePermanent = useCallback(() => handleDeletePermanent?.(item.id), [handleDeletePermanent, item.id]);
 
     return (
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: isMobile ? 24 : 32 }}>
@@ -201,21 +257,11 @@ function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, han
                 </div>
             </div>
 
-            <div style={{ display: 'flex', gap: isMobile ? 4 : 8 }}>
-                <button onClick={onFav} className="btn-ghost" style={{ padding: btnPad }}>
-                    <Star size={iconPx}
-                        color={item.is_favourite ? 'var(--accent)' : 'var(--text-secondary)'}
-                        fill={item.is_favourite ? 'var(--accent)' : 'none'} />
-                </button>
-                <button onClick={onEdit} className="btn-ghost" style={{ padding: btnPad }}>
-                    <Edit2 size={iconPx} />
-                </button>
-                <button onClick={onDelete} className="btn-ghost"
-                    disabled={deletingId === item.id}
-                    style={{ padding: btnPad, color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.2)', opacity: deletingId === item.id ? 0.5 : 1 }}>
-                    <Trash2 size={iconPx} />
-                </button>
-            </div>
+            <ItemDetailActions
+                item={item} btnPad={btnPad} iconPx={iconPx} deletingId={deletingId}
+                onFav={onFav} onEdit={onEdit} onDelete={onDelete}
+                onRestore={onRestore} onDeletePermanent={onDeletePermanent}
+            />
         </div>
     );
 }
@@ -227,6 +273,8 @@ interface ItemDetailPanelProps {
     handleToggleFav: (item: any) => void;
     handleOpenEdit: (item: any) => void;
     handleDelete: (id: string, cb?: () => void) => void;
+    handleRestoreItem?: (id: string) => void;
+    handleDeletePermanent?: (id: string) => void;
     deletingId: string | null;
     copyToClipboard: (text: string, label: string) => void;
     hibp: { checking: boolean; count: number | null };
@@ -234,7 +282,7 @@ interface ItemDetailPanelProps {
     onDeleteSuccess?: () => void;
 }
 
-function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, handleToggleFav, handleOpenEdit, handleDelete, deletingId, copyToClipboard, hibp, setHibp }: Readonly<ItemDetailPanelProps>) {
+function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, handleToggleFav, handleOpenEdit, handleDelete, handleRestoreItem, handleDeletePermanent, deletingId, copyToClipboard, hibp, setHibp }: Readonly<ItemDetailPanelProps>) {
 
     if (!selectedItem) return (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12, opacity: 0.4 }}>
@@ -254,7 +302,8 @@ function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, handleTo
             <ItemDetailHeader
                 item={selectedItem} isMobile={isMobile}
                 handleToggleFav={handleToggleFav} handleOpenEdit={handleOpenEdit}
-                handleDelete={handleDelete} deletingId={deletingId}
+                handleDelete={handleDelete} handleRestoreItem={handleRestoreItem}
+                handleDeletePermanent={handleDeletePermanent} deletingId={deletingId}
             />
             <ItemDetailFields
                 selectedItem={selectedItem} copyToClipboard={copyToClipboard}
@@ -290,8 +339,9 @@ function CategoryPill({ id, label, icon: Icon, isActive, onSelect }: Readonly<{
 export function MainDashboard(props: Readonly<any>) {
     const {
         user, category, searchValue, onSearchChange, handleExport, lockVault, handleLogout,
-        vaultItems, setShowAddModal, setCategory, selectedItem, handleSelectItem, selectedItemLoading,
-        handleToggleFav, handleOpenEdit, handleDelete, deletingId, copyToClipboard,
+        onOpenSettings, onToggleFavourites, onToggleTrash, isFavouritesView, isTrashView,
+        vaultItems, sidebarCounts, setShowAddModal, setCategory, selectedItem, handleSelectItem, selectedItemLoading,
+        handleToggleFav, handleOpenEdit, handleDelete, handleRestoreItem, handleDeletePermanent, deletingId, copyToClipboard,
         hibp, setHibp, showAddModal, newItem, setNewItem, savingItem, genOptions, handleAddItem,
         showEditModal, setShowEditModal, editForm, setEditForm, updatingItem, handleEditItem,
         filteredItems, page, totalPages, onPageChange, isSearchActive, searchLoading,
@@ -309,10 +359,12 @@ export function MainDashboard(props: Readonly<any>) {
     const handleEditClose = useCallback(() => { setShowEditModal(false); setEditForm(null); }, [setShowEditModal, setEditForm]);
     const handleOpenAddModal = useCallback(() => setShowAddModal(true), [setShowAddModal]);
     const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => onSearchChange(e.target.value), [onSearchChange]);
+    const handleFavouritesPill = useCallback(() => onToggleFavourites(), [onToggleFavourites]);
+    const handleTrashPill = useCallback(() => onToggleTrash(), [onToggleTrash]);
 
     const detailPanelProps: Omit<ItemDetailPanelProps, 'isMobile' | 'handleDelete' | 'onDeleteSuccess'> = {
         selectedItem, selectedItemLoading,
-        handleToggleFav, handleOpenEdit, deletingId, copyToClipboard, hibp, setHibp,
+        handleToggleFav, handleOpenEdit, handleRestoreItem, handleDeletePermanent, deletingId, copyToClipboard, hibp, setHibp,
     };
 
     return (
@@ -320,6 +372,7 @@ export function MainDashboard(props: Readonly<any>) {
             <MobileTopBar
                 mobilePanel={mobilePanel} selectedItem={selectedItem}
                 onBack={handleMobileBack} lockVault={lockVault} handleLogout={handleLogout}
+                onOpenSettings={onOpenSettings}
             />
 
             <style>{`
@@ -349,8 +402,12 @@ export function MainDashboard(props: Readonly<any>) {
                 <div style={{ overflowX: 'auto', display: 'flex', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
                     {CATEGORIES.map(({ id, label, icon }) => (
                         <CategoryPill key={id} id={id} label={label} icon={icon}
-                            isActive={category === id} onSelect={setCategory} />
+                            isActive={!isTrashView && !isFavouritesView && category === id} onSelect={setCategory} />
                     ))}
+                    <CategoryPill id="favourites" label="Favourites" icon={Star}
+                        isActive={isFavouritesView} onSelect={handleFavouritesPill} />
+                    <CategoryPill id="trash" label="Trash" icon={Trash2}
+                        isActive={isTrashView} onSelect={handleTrashPill} />
                 </div>
 
                 <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8, flexShrink: 0 }}>
@@ -359,10 +416,10 @@ export function MainDashboard(props: Readonly<any>) {
                         <input className="input-field" placeholder="Search vault..." value={searchValue}
                             onChange={handleSearchChange} style={{ paddingLeft: 36, fontSize: 'max(16px, 0.9rem)' }} />
                     </div>
-                    <button className="btn-primary" onClick={handleOpenAddModal}
+                    {!isTrashView && <button className="btn-primary" onClick={handleOpenAddModal}
                         style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', flexShrink: 0 }}>
                         <Plus size={16} />
-                    </button>
+                    </button>}
                 </div>
 
                 <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
@@ -394,9 +451,11 @@ export function MainDashboard(props: Readonly<any>) {
 
             {/* Desktop layout */}
             <DesktopSidebar
-                user={user} category={category} vaultItems={vaultItems}
+                user={user} category={category} vaultItems={vaultItems} sidebarCounts={sidebarCounts}
                 setCategory={setCategory} handleExport={handleExport}
                 lockVault={lockVault} handleLogout={handleLogout}
+                onOpenSettings={onOpenSettings} onToggleFavourites={onToggleFavourites}
+                onToggleTrash={onToggleTrash} isFavouritesView={isFavouritesView} isTrashView={isTrashView}
             />
 
             <div className="desktop-list-col" style={{
@@ -413,10 +472,10 @@ export function MainDashboard(props: Readonly<any>) {
                         <input className="input-field" placeholder="Search vault..." value={searchValue}
                             onChange={handleSearchChange} style={{ paddingLeft: 36 }} />
                     </div>
-                    <button className="btn-primary" onClick={handleOpenAddModal}
+                    {!isTrashView && <button className="btn-primary" onClick={handleOpenAddModal}
                         style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                         <Plus size={16} /> Add Item
-                    </button>
+                    </button>}
                 </div>
                 <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
                     <ItemList variant="desktop" items={filteredItems} loading={searchLoading}
