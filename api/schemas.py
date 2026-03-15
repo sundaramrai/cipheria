@@ -3,6 +3,8 @@ from typing import Optional, List
 from datetime import datetime
 from uuid import UUID
 
+HEX_64_REGEX = "^[0-9a-fA-F]{64}$"
+
 
 def _validate_favicon_url(v: Optional[str]) -> Optional[str]:
     if v is not None and not v.startswith("https://"):
@@ -14,21 +16,23 @@ def _validate_favicon_url(v: Optional[str]) -> Optional[str]:
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=8, max_length=128)
+    vault_salt: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
+    master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
     full_name: Optional[str] = Field(None, max_length=128)
     master_hint: Optional[str] = Field(None, max_length=256)
 
-    @field_validator("master_hint")
-    @classmethod
-    def hint_must_not_be_password(cls, v: Optional[str], info) -> Optional[str]:
-        if v and info.data.get("password") and v == info.data["password"]:
-            raise ValueError("Master hint must not be the same as your password")
-        return v
+
+class LoginChallengeRequest(BaseModel):
+    email: EmailStr
+
+
+class LoginChallengeResponse(BaseModel):
+    vault_salt: str
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
 
 
 class TokenResponse(BaseModel):
@@ -37,16 +41,47 @@ class TokenResponse(BaseModel):
     vault_salt: str
 
 
+class MessageResponse(BaseModel):
+    message: str
+
+
 class UserResponse(BaseModel):
     id: UUID
     email: str
     full_name: Optional[str] = None
     vault_salt: str
+    master_password_verifier: Optional[str] = None
     master_hint: Optional[str] = None
+    email_verified: bool = False
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(..., min_length=16, max_length=512)
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: Optional[str] = Field(None, max_length=128)
+    master_hint: Optional[str] = Field(None, max_length=256)
+
+
+class MasterPasswordItemUpdate(BaseModel):
+    id: UUID
+    encrypted_data: str = Field(..., min_length=1, max_length=100_000)
+
+
+class ChangeMasterPasswordRequest(BaseModel):
+    new_vault_salt: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
+    new_master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
+    master_hint: Optional[str] = Field(None, max_length=256)
+    items: List[MasterPasswordItemUpdate]
+
+
+class DeleteAccountRequest(BaseModel):
+    master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
 
 
 # Vault Items
@@ -84,6 +119,8 @@ class VaultItemSummary(BaseModel):
     category: str
     favicon_url: Optional[str] = None
     is_favourite: bool
+    is_deleted: bool = False
+    deleted_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -99,6 +136,8 @@ class VaultItemResponse(BaseModel):
     encrypted_data: str
     favicon_url: Optional[str] = None
     is_favourite: bool
+    is_deleted: bool = False
+    deleted_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -112,3 +151,14 @@ class PaginatedVaultResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+    sidebar_counts: Optional[VaultSidebarCountsResponse] = None
+
+
+class VaultSidebarCountsResponse(BaseModel):
+    all: int
+    login: int
+    card: int
+    note: int
+    identity: int
+    favourites: int
+    trash: int
