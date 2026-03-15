@@ -14,19 +14,47 @@
 const PBKDF2_ITERATIONS = 600_000;
 const KEY_LENGTH = 256;
 
-// Key Derivation
-export async function deriveKey(masterPassword: string, saltHex: string): Promise<CryptoKey> {
+async function deriveKeyBits(masterPassword: string, saltHex: string): Promise<ArrayBuffer> {
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(masterPassword),
     'PBKDF2',
     false,
-    ['deriveKey'],
+    ['deriveBits'],
   );
 
-  return crypto.subtle.deriveKey(
+  return crypto.subtle.deriveBits(
     { name: 'PBKDF2', salt: hexToBytes(saltHex), iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
     keyMaterial,
+    KEY_LENGTH,
+  );
+}
+
+async function hashBytesHex(buffer: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return bytesToHex(new Uint8Array(digest));
+}
+
+export function generateSaltHex(bytes = 32): string {
+  const array = new Uint8Array(bytes);
+  crypto.getRandomValues(array);
+  return bytesToHex(array);
+}
+
+export async function deriveMasterPasswordVerifier(
+  masterPassword: string,
+  saltHex: string,
+): Promise<string> {
+  const keyBits = await deriveKeyBits(masterPassword, saltHex);
+  return hashBytesHex(keyBits);
+}
+
+// Key Derivation
+export async function deriveKey(masterPassword: string, saltHex: string): Promise<CryptoKey> {
+  const keyBits = await deriveKeyBits(masterPassword, saltHex);
+  return crypto.subtle.importKey(
+    'raw',
+    keyBits,
     { name: 'AES-GCM', length: KEY_LENGTH },
     false,
     ['encrypt', 'decrypt'],
@@ -78,6 +106,10 @@ function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
     bytes[i / 2] = Number.parseInt(hex.slice(i, i + 2), 16);
   }
   return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array<ArrayBuffer>): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 // Password Generator
