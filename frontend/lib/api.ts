@@ -70,11 +70,25 @@ api.interceptors.response.use(
 // Auth
 
 export const authApi = {
-  register: (email: string, password: string, fullName?: string, masterHint?: string) =>
-    api.post('/api/auth/register', { email, password, full_name: fullName, master_hint: masterHint }),
+  register: (
+    email: string,
+    vaultSalt: string,
+    masterPasswordVerifier: string,
+    fullName?: string,
+    masterHint?: string,
+  ) => api.post('/api/auth/register', {
+    email,
+    vault_salt: vaultSalt,
+    master_password_verifier: masterPasswordVerifier,
+    full_name: fullName,
+    master_hint: masterHint,
+  }),
 
-  login: (email: string, password: string) =>
-    api.post('/api/auth/login', { email, password }),
+  loginChallenge: (email: string) =>
+    api.post('/api/auth/login/challenge', { email }),
+
+  login: (email: string, masterPasswordVerifier: string) =>
+    api.post('/api/auth/login', { email, master_password_verifier: masterPasswordVerifier }),
 
   refresh: () =>
     api.post('/api/auth/refresh'),
@@ -83,12 +97,31 @@ export const authApi = {
     api.post('/api/auth/logout'),
 
   me: () => api.get('/api/auth/me'),
+
+  requestEmailVerification: () =>
+    api.post('/api/auth/verify-email/request'),
+
+  verifyEmail: (token: string) =>
+    api.post('/api/auth/verify-email', { token }),
+
+  updateProfile: (data: { full_name?: string | null; master_hint?: string | null }) =>
+    api.patch('/api/auth/profile', data),
+
+  changeMasterPassword: (data: {
+    new_vault_salt: string;
+    new_master_password_verifier: string;
+    master_hint?: string | null;
+    items: Array<{ id: string; encrypted_data: string }>;
+  }) => api.patch('/api/auth/master-password', data),
+
+  deleteAccount: (masterPasswordVerifier: string) =>
+    api.delete('/api/auth/account', { data: { master_password_verifier: masterPasswordVerifier } }),
 };
 
 // Vault
 
 export const vaultApi = {
-  list: (params?: { category?: string; search?: string; favourites_only?: boolean; page?: number; page_size?: number }, signal?: AbortSignal) =>
+  list: (params?: { category?: string; search?: string; favourites_only?: boolean; deleted_only?: boolean; page?: number; page_size?: number }, signal?: AbortSignal) =>
     api.get('/api/vault', { params, signal }),
 
   get: (id: string) => api.get(`/api/vault/${id}`),
@@ -110,6 +143,10 @@ export const vaultApi = {
   }>) => api.patch(`/api/vault/${id}`, data),
 
   delete: (id: string) => api.delete(`/api/vault/${id}`),
+
+  restore: (id: string) => api.post(`/api/vault/${id}/restore`),
+
+  deletePermanent: (id: string) => api.delete(`/api/vault/${id}/permanent`),
 
   export: () => api.get('/api/vault/export/json'),
 };
