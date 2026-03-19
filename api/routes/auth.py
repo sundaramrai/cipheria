@@ -6,7 +6,6 @@ import os
 import uuid
 import secrets
 import logging
-import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
@@ -17,6 +16,8 @@ from sqlalchemy.orm import Session
 from database import get_db, User, AuditLog, RefreshToken, VaultItem, AuthToken
 from crypto import (
     hash_password,
+    verify_password,
+    generate_salt,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -34,6 +35,7 @@ from schemas import (
     UpdateProfileRequest,
     ChangeMasterPasswordRequest,
     DeleteAccountRequest,
+    VerifyMasterPasswordRequest,
     MessageResponse,
 )
 from deps import get_current_user_from_db, DBUser
@@ -49,7 +51,7 @@ from cache import (
     prime_vault_salt,
     set_cached_user,
 )
-from limiter import limiter
+from limiter import limiter, get_client_ip
 from mailer import send_email, build_app_url
 
 logger = logging.getLogger(__name__)
@@ -93,7 +95,7 @@ def _log_action(db: Session, user_id, action: str, request: Request) -> None:
         AuditLog(
             user_id=user_id,
             action=action,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
             user_agent=request.headers.get("user-agent"),
         )
     )
@@ -130,12 +132,15 @@ def _user_cache_dict(user: User) -> dict:
         "email": user.email,
         "full_name": user.full_name,
         "vault_salt": user.vault_salt,
-        "master_password_verifier": user.master_password_verifier,
         "master_hint": user.master_hint,
         "email_verified": user.email_verified,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "is_active": user.is_active,
     }
+
+
+def _verify_master_password(user: User, verifier: str) -> bool:
+    return bool(user.hashed_password and verify_password(verifier, user.hashed_password))
 
 
 def _issue_auth_token(
@@ -215,7 +220,6 @@ def register(
         full_name=body.full_name,
         master_hint=body.master_hint,
         vault_salt=body.vault_salt,
-        master_password_verifier=body.master_password_verifier,
     )
     db.add(user)
     db.flush()
@@ -263,17 +267,13 @@ def login_challenge(
     db: Annotated[Session, Depends(get_db)],
 ):
     user = db.query(User).filter(User.email == body.email).first()
-    if not user or not user.is_active or not user.master_password_verifier:
-        raise HTTPException(status_code=401, detail=INVALID_EMAIL_OR_PASSWORD)
-    return LoginChallengeResponse(vault_salt=user.vault_salt)
+    vault_salt = user.vault_salt if user and user.is_active else generate_salt()
+    return LoginChallengeResponse(vault_salt=vault_salt)
 
 @router.post(
     "/login",
     response_model=TokenResponse,
-    responses={
-        400: {"description": "Account must be migrated or recreated"},
-        401: {"description": "Invalid email or password"},
-    },
+    responses={401: {"description": "Invalid email or password"}},
 )
 @limiter.limit("10/minute")
 def login(
@@ -288,12 +288,7 @@ def login(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail=INVALID_EMAIL_OR_PASSWORD)
 
-    if not user.master_password_verifier:
-        raise HTTPException(
-            status_code=400,
-            detail="This account was created before the single master-password flow and must be migrated or recreated",
-        )
-    if not hmac.compare_digest(user.master_password_verifier, body.master_password_verifier):
+    if not _verify_master_password(user, body.master_password_verifier):
         raise HTTPException(status_code=401, detail=INVALID_EMAIL_OR_PASSWORD)
 
     access_token = create_access_token({"sub": str(user.id)})
@@ -531,6 +526,24 @@ def resend_verification_email(
 
 
 @router.post(
+    "/verify-master-password",
+    response_model=MessageResponse,
+    responses={401: {"description": "Invalid master password"}},
+)
+@limiter.limit("20/minute")
+def verify_master_password_route(
+    body: VerifyMasterPasswordRequest,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: DBUser,
+):
+    if not _verify_master_password(current_user, body.master_password_verifier):
+        raise HTTPException(status_code=401, detail="Invalid master password")
+
+    return MessageResponse(message="Master password verified")
+
+
+@router.post(
     "/forgot-password",
     response_model=MessageResponse,
     responses={400: {"description": "Master password reset is not supported in zero-knowledge mode"}},
@@ -615,8 +628,8 @@ def change_master_password(
             raise HTTPException(status_code=400, detail="Master password payload contains an unknown item")
         item.encrypted_data = update.encrypted_data
 
+    current_user.hashed_password = hash_password(body.new_master_password_verifier)
     current_user.vault_salt = body.new_vault_salt
-    current_user.master_password_verifier = body.new_master_password_verifier
     current_user.master_hint = body.master_hint
     _log_action(db, current_user.id, "MASTER_PASSWORD_CHANGED", request)
     db.commit()
@@ -640,9 +653,7 @@ def delete_account(
     db: Annotated[Session, Depends(get_db)],
     current_user: DBUser,
 ):
-    if not current_user.master_password_verifier:
-        raise HTTPException(status_code=400, detail="Account is missing a master password verifier")
-    if not hmac.compare_digest(body.master_password_verifier, current_user.master_password_verifier):
+    if not _verify_master_password(current_user, body.master_password_verifier):
         raise HTTPException(status_code=401, detail="Invalid master password")
 
     user_id = current_user.id
