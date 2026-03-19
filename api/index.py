@@ -1,6 +1,5 @@
 import sys
 import os
-import re
 import logging
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -54,18 +53,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 _allowed_origins = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 ]
-_allowed_origin_patterns = [
-    os.getenv("ALLOWED_ORIGIN_REGEX", r"^https://cipheria\.vercel\.app$"),
-]
-_allowed_extension_origins = [
-    o.strip()
-    for o in os.getenv("ALLOWED_EXTENSION_ORIGINS", "").split(",")
-    if o.strip()
-]
-_allowed_origin_patterns.extend(
-    f"^{re.escape(origin)}$" for origin in _allowed_extension_origins
-)
-_allowed_origin_regex = "|".join(_allowed_origin_patterns)
+_allowed_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX", r"^https://cipheria\.vercel\.app$")
 
 app.add_middleware(
     CORSMiddleware,
