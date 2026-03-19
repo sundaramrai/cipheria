@@ -50,3 +50,29 @@ export interface UserProfile {
     email_verified: boolean;
     created_at?: string;
 }
+
+export interface SidebarCounts {
+    all: number;
+    login: number;
+    card: number;
+    note: number;
+    identity: number;
+    favourites: number;
+    trash: number;
+}
+
+export interface AuthSession {
+    access_token: string;
+    token_type: string;
+    vault_salt: string;
+    user: UserProfile;
+}
+
+export interface PaginatedVaultItems<TItem> {
+    items: TItem[];
+    total: number;
+    page: number;
+    page_size: number;
+    total_pages: number;
+    sidebar_counts?: SidebarCounts | null;
+}
