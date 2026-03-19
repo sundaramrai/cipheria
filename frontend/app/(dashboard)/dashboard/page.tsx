@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { toastService } from '@/lib/toast';
-import { logAuthDebug } from '@/lib/authDebug';
 import { getItemLoadError, parseApiError } from '@/lib/errors';
 import { useAuthStore } from '@/lib/store';
 import type { SidebarCounts, VaultItem } from '@/lib/types';
@@ -198,7 +197,6 @@ export default function Page() {
   const [verificationSending, setVerificationSending] = useState(false);
   const [masterPasswordSaving, setMasterPasswordSaving] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
-  const didLogInitialStateRef = useRef(false);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const decryptingItemIds = useRef(new Set<string>());
@@ -257,83 +255,48 @@ export default function Page() {
 
   // Idle auto-lock (extracted hook)
   const handleLockVault = useCallback(() => {
-    logAuthDebug('dashboard.handleLockVault');
     lockVault();
     emitAuthEvent('lock');
   }, [lockVault]);
 
   useIdleTimer(isVaultLocked, handleLockVault);
-  useEffect(() => {
-    if (didLogInitialStateRef.current) return;
-    didLogInitialStateRef.current = true;
-    logAuthDebug('dashboard.initial', {
-      isAuthenticated,
-      isVaultLocked,
-      hasCryptoKey: Boolean(cryptoKey),
-      userId: user?.id ?? null,
-    });
-  }, [cryptoKey, isAuthenticated, isVaultLocked, user]);
-
-  useEffect(() => {
-    logAuthDebug('dashboard.state', {
-      isAuthenticated,
-      isVaultLocked,
-      hasCryptoKey: Boolean(cryptoKey),
-      userId: user?.id ?? null,
-      vaultItemsCount: vaultItems.length,
-    });
-  }, [cryptoKey, isAuthenticated, isVaultLocked, user, vaultItems.length]);
-
   // Session restore
   useEffect(() => {
     let active = true;
 
     if (isAuthenticated) {
-      logAuthDebug('dashboard.restore.skip.already-authenticated', {
-        isVaultLocked,
-        hasCryptoKey: Boolean(cryptoKey),
-        userId: user?.id ?? null,
-      });
       setSessionLoading(false);
       return () => {
         active = false;
       };
     }
 
-    logAuthDebug('dashboard.restore.begin');
     void restoreSession().then((ok) => {
       if (!active) return;
-      logAuthDebug('dashboard.restore.resolved', {
-        ok,
-      });
       setSessionLoading(false);
       if (ok) return;
-      logAuthDebug('dashboard.restore.redirect.auth');
       router.replace('/auth');
     });
 
     return () => {
       active = false;
     };
-  }, [cryptoKey, isAuthenticated, isVaultLocked, restoreSession, router, user?.id]);
+  }, [isAuthenticated, restoreSession, router]);
 
   useEffect(() => {
     return subscribeToAuthEvents((event: AuthSyncEvent) => {
       if (event.type === 'logout') {
-        logAuthDebug('dashboard.authSync.logout');
         logout();
         router.replace('/auth');
         return;
       }
 
       if (event.type === 'lock') {
-        logAuthDebug('dashboard.authSync.lock');
         lockVault();
         return;
       }
 
       if (event.type === 'user-updated') {
-        logAuthDebug('dashboard.authSync.user-updated');
         void authApi.me()
           .then(({ data }) => setUser(data))
           .catch(() => {
