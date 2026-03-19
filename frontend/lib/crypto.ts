@@ -181,11 +181,11 @@ export function passwordStrength(password: string): {
   if (/[^A-Za-z0-9]/.test(password)) score++;
 
   const levels = [
-    { label: 'Very Weak', color: '#ef4444' },
-    { label: 'Weak', color: '#f97316' },
-    { label: 'Fair', color: '#eab308' },
-    { label: 'Strong', color: '#84cc16' },
-    { label: 'Very Strong', color: '#22c55e' },
+    { label: 'Very Weak', color: 'var(--danger)' },
+    { label: 'Weak', color: 'var(--strength-weak)' },
+    { label: 'Fair', color: 'var(--strength-fair)' },
+    { label: 'Strong', color: 'var(--strength-strong)' },
+    { label: 'Very Strong', color: 'var(--success)' },
   ];
 
   return { score, ...levels[Math.min(score, 4)] };
