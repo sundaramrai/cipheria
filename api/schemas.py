@@ -35,12 +35,6 @@ class LoginRequest(BaseModel):
     master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
 
 
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    vault_salt: str
-
-
 class MessageResponse(BaseModel):
     message: str
 
@@ -56,6 +50,13 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    vault_salt: str
+    user: UserResponse
 
 
 class VerifyEmailRequest(BaseModel):
@@ -165,3 +166,12 @@ class PaginatedVaultResponse(BaseModel):
     page_size: int
     total_pages: int
     sidebar_counts: Optional[VaultSidebarCountsResponse] = None
+
+
+class UnlockedVaultResponse(BaseModel):
+    items: List[VaultItemResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    sidebar_counts: VaultSidebarCountsResponse
