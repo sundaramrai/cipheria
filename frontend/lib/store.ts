@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { authApi, setAccessToken, getAccessToken } from '@/lib/api';
+import { logAuthDebug } from '@/lib/authDebug';
 import type { UserProfile, VaultItem } from '@/lib/types';
 
 interface AuthStore {
@@ -29,6 +30,11 @@ export const useAuthStore = create<AuthStore>((set) => ({
   isVaultLocked: true,
 
   completeAuth: (user, accessToken, key) => {
+    logAuthDebug('store.completeAuth', {
+      userId: user.id,
+      hasAccessToken: Boolean(accessToken),
+      hasCryptoKey: Boolean(key),
+    });
     setAccessToken(accessToken);
     set({
       user,
@@ -55,7 +61,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
   removeVaultItem: (id) =>
     set((state) => ({ vaultItems: state.vaultItems.filter((v) => v.id !== id) })),
 
-  lockVault: () => set({ cryptoKey: null, isVaultLocked: true, vaultItems: [] }),
+  lockVault: () => {
+    logAuthDebug('store.lockVault');
+    set({ cryptoKey: null, isVaultLocked: true, vaultItems: [] });
+  },
 
   restoreSession: (() => {
     /**
@@ -68,6 +77,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
       if (_pending) return _pending;
       _pending = (async () => {
         try {
+          logAuthDebug('store.restoreSession.start', {
+            hasInMemoryAccessToken: Boolean(getAccessToken()),
+          });
           let token = getAccessToken();
           let user = null;
           if (!token) {
@@ -76,14 +88,25 @@ export const useAuthStore = create<AuthStore>((set) => ({
             token = refreshData.access_token;
             user = refreshData.user;
             setAccessToken(token);
+            logAuthDebug('store.restoreSession.refresh.success', {
+              userId: user.id,
+              hasAccessToken: Boolean(token),
+            });
           }
           if (!user) {
             const { data } = await authApi.me();
             user = data;
+            logAuthDebug('store.restoreSession.me.success', {
+              userId: user.id,
+            });
           }
           set({ user, isAuthenticated: true });
+          logAuthDebug('store.restoreSession.success', {
+            userId: user.id,
+          });
           return true;
         } catch {
+          logAuthDebug('store.restoreSession.failure');
           setAccessToken(null);
           set({
             user: null,
@@ -102,6 +125,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
   })(),
 
   logout: () => {
+    logAuthDebug('store.logout');
     setAccessToken(null);
     set({
       user: null,
