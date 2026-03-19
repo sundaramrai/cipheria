@@ -34,7 +34,7 @@ export function CategoryPicker({ value, onChange }: Readonly<{ value: string; on
           <button key={v} type="button" onClick={() => onChange(v)} style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '6px 13px', borderRadius: 100,
-            border: `1px solid ${active ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`,
+            border: `1px solid ${active ? 'var(--accent-border-focus)' : 'var(--border)'}`,
             background: active ? 'var(--accent-dim)' : 'transparent',
             color: active ? 'var(--accent)' : 'var(--text-secondary)',
             fontSize: '0.78rem', fontFamily: 'var(--font-body)',
@@ -77,7 +77,7 @@ export function Modal({ children, onClose, title, icon }: Readonly<{
     <dialog ref={dialogRef} style={{
       position: 'fixed', inset: 0, margin: 0,
       width: '100%', height: '100%', maxWidth: '100%', maxHeight: '100%',
-      background: 'rgba(0,0,0,0.7)',
+      background: 'var(--modal-backdrop)',
       backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
       zIndex: 100, padding: 0, border: 'none',
@@ -100,11 +100,11 @@ export function Modal({ children, onClose, title, icon }: Readonly<{
         borderRadius: 'var(--radius-xl) var(--radius-xl) 0 0',
         width: '100%', maxWidth: 500, maxHeight: '93dvh',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        boxShadow: '0 -8px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(245,158,11,0.06)',
+        boxShadow: 'var(--sheet-shadow)',
       }}>
         {/* Mobile drag handle */}
         <div className="modal-handle" style={{ display: 'flex', justifyContent: 'center', paddingTop: 10, paddingBottom: 2, flexShrink: 0 }}>
-          <div style={{ width: 32, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.12)' }} />
+          <div style={{ width: 32, height: 3, borderRadius: 2, background: 'var(--grip-bg)' }} />
         </div>
 
         {/* Header */}
@@ -113,7 +113,7 @@ export function Modal({ children, onClose, title, icon }: Readonly<{
             {icon && (
               <div style={{
                 width: 32, height: 32, borderRadius: 9,
-                background: 'var(--accent-dim)', border: '1px solid rgba(245,158,11,0.22)',
+                background: 'var(--accent-dim)', border: '1px solid var(--accent-border-soft)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
               }}>
                 {icon}
@@ -151,7 +151,7 @@ function StrengthBar({ password }: Readonly<{ password: string }>) {
         {[0, 1, 2, 3, 4].map(i => (
           <div key={i} style={{
             height: 2, flex: 1, borderRadius: 2,
-            background: i <= s.score ? s.color : 'rgba(255,255,255,0.07)',
+            background: i <= s.score ? s.color : 'var(--skeleton-2)',
             transition: 'background 0.3s',
           }} />
         ))}
