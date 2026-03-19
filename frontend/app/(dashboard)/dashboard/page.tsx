@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { toastService } from '@/lib/toast';
 import { getItemLoadError, parseApiError } from '@/lib/errors';
 import { useAuthStore } from '@/lib/store';
-import type { VaultItem } from '@/lib/types';
+import type { SidebarCounts, VaultItem } from '@/lib/types';
 import { vaultApi, authApi } from '@/lib/api';
 import { emitAuthEvent, subscribeToAuthEvents } from '@/lib/authSync';
 import type { AuthSyncEvent } from '@/lib/authSync';
@@ -41,16 +41,6 @@ function applyFavUpdate(
 ): VaultItem[] | null {
   return prev?.map((result) => (result.id === itemId ? updated : result)) ?? null;
 }
-
-type SidebarCounts = {
-  all: number;
-  login: number;
-  card: number;
-  note: number;
-  identity: number;
-  favourites: number;
-  trash: number;
-};
 
 const EMPTY_SIDEBAR_COUNTS: SidebarCounts = {
   all: 0,
@@ -121,9 +111,8 @@ function useVaultUnlock(
           if (!salt) throw new Error('NO_SALT');
           const key = await deriveKey(masterPassword, salt);
           const verifier = await deriveMasterPasswordVerifier(masterPassword, salt);
-          update('Verifying master password...');
-          await authApi.verifyMasterPassword(verifier);
-          const { data: listResult } = await vaultApi.list({ page_size: 50 });
+          update('Unlocking vault...');
+          const { data: listResult } = await authApi.unlock(verifier);
           const items: VaultItem[] = listResult.items;
           setVaultKey(key);
           update('Decrypting items...');
