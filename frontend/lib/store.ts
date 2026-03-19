@@ -9,7 +9,6 @@ interface AuthStore {
   vaultItems: VaultItem[];
   isVaultLocked: boolean;
 
-  setAuth: (user: UserProfile, accessToken: string) => void;
   completeAuth: (user: UserProfile, accessToken: string, key: CryptoKey) => void;
   setUser: (user: UserProfile | null) => void;
   setVaultKey: (key: CryptoKey) => void;
@@ -28,15 +27,6 @@ export const useAuthStore = create<AuthStore>((set) => ({
   isAuthenticated: false,
   vaultItems: [],
   isVaultLocked: true,
-
-  /**
-   * setAuth is the single source of truth for storing the access token.
-   * Callers must NOT call setAccessToken separately before invoking this.
-   */
-  setAuth: (user, accessToken) => {
-    setAccessToken(accessToken);
-    set({ user, isAuthenticated: true });
-  },
 
   completeAuth: (user, accessToken, key) => {
     setAccessToken(accessToken);
@@ -70,7 +60,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
   restoreSession: (() => {
     /**
      * Shared promise — prevents concurrent callers (StrictMode, multi-page mounts)
-     * from each firing their own refresh + /me pair.
+     * from each firing their own refresh bootstrap work.
      */
     let _pending: Promise<boolean> | null = null;
 
@@ -79,13 +69,18 @@ export const useAuthStore = create<AuthStore>((set) => ({
       _pending = (async () => {
         try {
           let token = getAccessToken();
+          let user = null;
           if (!token) {
             // HttpOnly cookie sent automatically — no localStorage needed
             const { data: refreshData } = await authApi.refresh();
-            token = refreshData.access_token as string;
+            token = refreshData.access_token;
+            user = refreshData.user;
             setAccessToken(token);
           }
-          const { data: user } = await authApi.me();
+          if (!user) {
+            const { data } = await authApi.me();
+            user = data;
+          }
           set({ user, isAuthenticated: true });
           return true;
         } catch {
