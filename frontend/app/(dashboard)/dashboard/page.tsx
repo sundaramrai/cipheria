@@ -3,13 +3,12 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation';
 import { toastService } from '@/lib/toast';
 import { getItemLoadError, parseApiError } from '@/lib/errors';
-import { clearAuthHandoff, consumeAuthHandoff } from '@/lib/authHandoff';
 import { useAuthStore } from '@/lib/store';
 import type { SidebarCounts, VaultItem } from '@/lib/types';
 import { vaultApi, authApi } from '@/lib/api';
 import { emitAuthEvent, subscribeToAuthEvents } from '@/lib/authSync';
 import type { AuthSyncEvent } from '@/lib/authSync';
-import { deriveKey, deriveMasterPasswordVerifier, encryptData, decryptData, generateSaltHex, importVaultKeyMaterial } from '@/lib/crypto';
+import { deriveKey, deriveMasterPasswordVerifier, encryptData, decryptData, generateSaltHex } from '@/lib/crypto';
 import { Category, genOptions, emptyForm } from '../../../components/dashboard/types';
 import type { ItemForm } from '../../../components/dashboard/types';
 import { tryGetFaviconUrl, fetchAndDecryptItem, buildPayload } from '../../../components/dashboard/utils';
@@ -27,68 +26,6 @@ async function decryptSearchItem(item: VaultItem, key: CryptoKey, storeItems: Va
   } catch {
     return item;
   }
-}
-
-async function decryptVaultItems(items: VaultItem[], key: CryptoKey): Promise<VaultItem[]> {
-  return Promise.all(
-    items.map(async (item) => {
-      if (!item.encrypted_data) return item;
-      try {
-        return { ...item, decrypted: await decryptData(item.encrypted_data, key) };
-      } catch {
-        return item;
-      }
-    }),
-  );
-}
-
-type UnlockStateResult = {
-  items: VaultItem[];
-  total?: number | null;
-  total_pages?: number | null;
-  sidebar_counts?: SidebarCounts | null;
-};
-
-type UnlockStateActions = {
-  setVaultKey: (key: CryptoKey) => void;
-  setVaultItems: (items: VaultItem[]) => void;
-  setTotalPages: (pages: number) => void;
-  setTotalItems: (items: number) => void;
-  setSidebarCounts: (counts: SidebarCounts) => void;
-  cacheAllView: (items: VaultItem[], totalPages: number, totalItems: number) => void;
-};
-
-async function applyUnlockedVaultState(
-  result: UnlockStateResult,
-  key: CryptoKey,
-  actions: UnlockStateActions,
-): Promise<void> {
-  const decryptedItems = await decryptVaultItems(result.items, key);
-  const totalPages = result.total_pages ?? 1;
-  const totalItems = result.total ?? 0;
-
-  actions.setVaultKey(key);
-  actions.setVaultItems(decryptedItems);
-  actions.setTotalPages(totalPages);
-  actions.setTotalItems(totalItems);
-  if (result.sidebar_counts) {
-    actions.setSidebarCounts(result.sidebar_counts);
-  }
-  actions.cacheAllView(decryptedItems, totalPages, totalItems);
-}
-
-async function restoreUnlockedVaultFromHandoff(
-  handoff: ReturnType<typeof consumeAuthHandoff>,
-  actions: UnlockStateActions,
-): Promise<void> {
-  if (!handoff) return;
-
-  const [{ data: listResult }, key] = await Promise.all([
-    authApi.unlock(handoff.masterPasswordVerifier),
-    importVaultKeyMaterial(handoff.keyMaterial),
-  ]);
-
-  await applyUnlockedVaultState(listResult, key, actions);
 }
 
 function toItemFormCategory(category: string): ItemForm['category'] {
@@ -305,15 +242,6 @@ export default function Page() {
       trash: Math.max(0, prev.trash - previousDelta.trash + nextDelta.trash),
     }));
   }, []);
-  const unlockStateActions = useMemo<UnlockStateActions>(() => ({
-    setVaultKey,
-    setVaultItems,
-    setTotalPages,
-    setTotalItems,
-    setSidebarCounts,
-    cacheAllView: (items, nextTotalPages, nextTotalItems) =>
-      setCachedView('all', items, 1, nextTotalPages, nextTotalItems),
-  }), [setCachedView, setVaultItems, setVaultKey]);
   const { masterPassword, setMasterPassword, unlocking, unlockVault } =
     useVaultUnlock(
       user,
@@ -343,31 +271,17 @@ export default function Page() {
       };
     }
 
-    void (async () => {
-      try {
-        const ok = await restoreSession();
-        if (!active) return;
-
-        if (!ok) {
-          clearAuthHandoff();
-          router.replace('/auth');
-          return;
-        }
-
-        const currentUser = useAuthStore.getState().user;
-        const handoff = consumeAuthHandoff(currentUser?.id);
-        await restoreUnlockedVaultFromHandoff(handoff, unlockStateActions);
-      } catch {
-        clearAuthHandoff();
-      } finally {
-        if (active) setSessionLoading(false);
-      }
-    })();
+    void restoreSession().then((ok) => {
+      if (!active) return;
+      setSessionLoading(false);
+      if (ok) return;
+      router.replace('/auth');
+    });
 
     return () => {
       active = false;
     };
-  }, [isAuthenticated, restoreSession, router, unlockStateActions]);
+  }, [isAuthenticated, restoreSession, router]);
 
   useEffect(() => {
     return subscribeToAuthEvents((event: AuthSyncEvent) => {
@@ -391,12 +305,6 @@ export default function Page() {
       }
     });
   }, [lockVault, logout, router, setUser]);
-
-  useEffect(() => {
-    if (isAuthenticated && !isVaultLocked) {
-      clearAuthHandoff();
-    }
-  }, [isAuthenticated, isVaultLocked]);
 
   useEffect(() => {
     if (isVaultLocked) {
