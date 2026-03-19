@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation';
 import { toastService } from '@/lib/toast';
 import { parseApiError } from '@/lib/errors';
 import { authApi } from '@/lib/api';
-import { logAuthDebug } from '@/lib/authDebug';
 import { useAuthStore } from '@/lib/store';
 import { deriveKey, deriveMasterPasswordVerifier, generateSaltHex, passwordStrength } from '@/lib/crypto';
 
@@ -56,10 +55,6 @@ export function useAuthForm(initialTab: Tab = 'login') {
     const handleSubmit = async (e: React.SyntheticEvent) => {
         e.preventDefault();
         setLoading(true);
-        logAuthDebug('auth.submit.start', {
-            tab,
-            email: form.email,
-        });
         try {
             if (tab === 'register') {
                 if (!form.masterPassword) {
@@ -80,10 +75,6 @@ export function useAuthForm(initialTab: Tab = 'login') {
                     form.fullName,
                     form.masterHint,
                 );
-                logAuthDebug('auth.register.success', {
-                    userId: data.user.id,
-                    hasAccessToken: Boolean(data.access_token),
-                });
                 completeAuth(data.user, data.access_token, key);
                 toastService.success('Account created. Check your email to verify the account.');
             } else {
@@ -92,29 +83,14 @@ export function useAuthForm(initialTab: Tab = 'login') {
                     return;
                 }
                 const { data: challenge } = await authApi.loginChallenge(form.email);
-                logAuthDebug('auth.login.challenge.success', {
-                    email: form.email,
-                    hasVaultSalt: Boolean(challenge.vault_salt),
-                });
                 const key = await deriveKey(form.masterPassword, challenge.vault_salt);
                 const masterPasswordVerifier = await deriveMasterPasswordVerifier(form.masterPassword, challenge.vault_salt);
                 const { data } = await authApi.login(form.email, masterPasswordVerifier);
-                logAuthDebug('auth.login.success', {
-                    userId: data.user.id,
-                    hasAccessToken: Boolean(data.access_token),
-                });
                 completeAuth(data.user, data.access_token, key);
                 toastService.success('Welcome back!');
             }
-            logAuthDebug('auth.submit.navigate.dashboard', {
-                tab,
-            });
             router.replace('/dashboard');
         } catch (err: unknown) {
-            logAuthDebug('auth.submit.error', {
-                tab,
-                message: err instanceof Error ? err.message : 'unknown',
-            });
             toastService.error(parseApiError(err, 'Something went wrong'));
         } finally {
             setLoading(false);
