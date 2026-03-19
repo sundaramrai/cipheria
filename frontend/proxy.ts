@@ -22,5 +22,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-    matcher: ['/auth', '/api/auth/login', '/api/auth/register', '/api/auth/refresh'],
+    matcher: ['/auth'],
 };
