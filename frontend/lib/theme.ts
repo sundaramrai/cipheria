@@ -19,10 +19,15 @@ export function resolveThemePreference(theme: ThemePreference): ResolvedTheme {
   return globalThis.window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
-export function applyThemePreference(theme: ThemePreference) {
+export function syncThemePreference(theme: ThemePreference) {
   if (typeof document === 'undefined') return;
   const resolved = resolveThemePreference(theme);
   document.documentElement.dataset.theme = theme;
   document.documentElement.dataset.resolvedTheme = resolved;
+}
+
+export function applyThemePreference(theme: ThemePreference) {
+  if (globalThis.window === undefined) return;
+  syncThemePreference(theme);
   globalThis.window.localStorage.setItem(THEME_STORAGE_KEY, theme);
 }
