@@ -62,6 +62,14 @@ const EMPTY_SIDEBAR_COUNTS: SidebarCounts = {
   trash: 0,
 };
 
+function FullScreenMessage({ message }: Readonly<{ message: string }>) {
+  return (
+    <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+      <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{message}</div>
+    </div>
+  );
+}
+
 type CachedViewKey = 'all' | 'favourites' | 'trash';
 
 type CachedViewState = {
@@ -828,13 +836,9 @@ export default function Page() {
     [searchResults, vaultItems, category, isFavouritesView, isTrashView],
   );
 
-  if (sessionLoading) return (
-    <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-      <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Loading...</div>
-    </div>
-  );
+  if (sessionLoading) return <FullScreenMessage message="Loading..." />;
 
-  if (!isAuthenticated) return null;
+  if (!isAuthenticated) return <FullScreenMessage message="Redirecting to sign in..." />;
 
   if (isVaultLocked) return (
     <LockedVaultScreen
