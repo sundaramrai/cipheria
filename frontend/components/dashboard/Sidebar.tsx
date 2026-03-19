@@ -136,7 +136,7 @@ export function MobileTopBar({ mobilePanel, selectedItem, onBack, lockVault, han
   return (
     <div className="mobile-topbar" style={{
       position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50,
-      background: 'rgba(8,7,6,0.96)',
+      background: 'var(--surface-veil-strong)',
       backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
       borderBottom: '1px solid var(--border)',
       padding: '11px 14px', alignItems: 'center', justifyContent: 'space-between',
