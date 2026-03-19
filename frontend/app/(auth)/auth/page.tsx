@@ -309,7 +309,7 @@ function AuthForm({ initialTab }: Readonly<{ initialTab: 'login' | 'register' }>
 function AuthPageContent() {
   const router = useRouter();
   const params = useSearchParams();
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, cryptoKey } = useAuthStore();
   const mode = params.get('mode');
   const token = params.get('token') ?? '';
   const initialTab = params.get('tab') === 'register' ? 'register' : 'login';
@@ -322,7 +322,8 @@ function AuthPageContent() {
 
   if (mode === 'verify-email') return <VerifyEmailView token={token} />;
   if (mode === 'reset-password') return <ResetNotSupportedView />;
-  if (isAuthenticated && !mode) {
+  if (isAuthenticated && !mode && cryptoKey) return null;
+  if (isAuthenticated && !mode && !cryptoKey) {
     return (
       <AuxShell title="Opening Vault" centered>
         <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
