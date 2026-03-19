@@ -50,7 +50,6 @@ class UserResponse(BaseModel):
     email: str
     full_name: Optional[str] = None
     vault_salt: str
-    master_password_verifier: Optional[str] = None
     master_hint: Optional[str] = None
     email_verified: bool = False
     created_at: datetime
@@ -81,6 +80,10 @@ class ChangeMasterPasswordRequest(BaseModel):
 
 
 class DeleteAccountRequest(BaseModel):
+    master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
+
+
+class VerifyMasterPasswordRequest(BaseModel):
     master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
 
 
