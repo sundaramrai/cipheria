@@ -32,9 +32,9 @@ if not _jwt_secret:
 SECRET_KEY: str = _jwt_secret
 
 ALGORITHM = "HS256"
-# 5 minutes — short window limits damage if an access token is stolen.
+# 15 minutes — short window limits damage if an access token is stolen.
 # The client silently rotates via /auth/refresh using the HttpOnly cookie.
-ACCESS_TOKEN_EXPIRE_MINUTES = 5
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
 
 # Single source of truth — cache.py imports this to stay in sync
 REFRESH_TOKEN_EXPIRE_DAYS = 30
