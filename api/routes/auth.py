@@ -17,6 +17,7 @@ from database import get_db, User, AuditLog, RefreshToken, VaultItem, AuthToken
 from crypto import (
     hash_password,
     verify_password,
+    verify_password_legacy,
     generate_salt,
     create_access_token,
     create_refresh_token,
@@ -140,7 +141,19 @@ def _user_cache_dict(user: User) -> dict:
 
 
 def _verify_master_password(user: User, verifier: str) -> bool:
-    return bool(user.hashed_password and verify_password(verifier, user.hashed_password))
+    if not user.hashed_password:
+        return False
+
+    if verify_password(verifier, user.hashed_password):
+        return True
+
+    # Compatibility path for accounts created before verifier hashing was
+    # simplified from SHA-256+base64+bcrypt to direct bcrypt(verifier).
+    if verify_password_legacy(verifier, user.hashed_password):
+        user.hashed_password = hash_password(verifier)
+        return True
+
+    return False
 
 
 def _issue_auth_token(

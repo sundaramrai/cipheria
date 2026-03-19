@@ -9,6 +9,7 @@ Handles: password hashing (bcrypt), JWT creation/verification,
 and secure salt generation for client-side key derivation.
 """
 
+import base64
 import os
 import secrets
 import hashlib
@@ -48,6 +49,11 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode())
+
+
+def verify_password_legacy(plain: str, hashed: str) -> bool:
+    legacy_input = base64.b64encode(hashlib.sha256(plain.encode("utf-8")).digest())
+    return bcrypt.checkpw(legacy_input, hashed.encode())
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
