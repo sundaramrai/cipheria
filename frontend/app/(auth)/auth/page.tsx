@@ -322,6 +322,15 @@ function AuthPageContent() {
 
   if (mode === 'verify-email') return <VerifyEmailView token={token} />;
   if (mode === 'reset-password') return <ResetNotSupportedView />;
+  if (isAuthenticated && !mode) {
+    return (
+      <AuxShell title="Opening Vault" centered>
+        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          Redirecting to your dashboard...
+        </p>
+      </AuxShell>
+    );
+  }
 
   return (
     <main
