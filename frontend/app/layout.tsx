@@ -54,7 +54,12 @@ export default function RootLayout({ children }: { readonly children: React.Reac
   `;
 
   return (
-    <html lang="en" suppressHydrationWarning className={`${cormorant.variable} ${dmMono.variable} ${outfit.variable}`}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      data-scroll-behavior="smooth"
+      className={`${cormorant.variable} ${dmMono.variable} ${outfit.variable}`}
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
