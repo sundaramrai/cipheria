@@ -10,6 +10,7 @@ interface AuthStore {
   isVaultLocked: boolean;
 
   setAuth: (user: UserProfile, accessToken: string) => void;
+  completeAuth: (user: UserProfile, accessToken: string, key: CryptoKey) => void;
   setUser: (user: UserProfile | null) => void;
   setVaultKey: (key: CryptoKey) => void;
   setVaultItems: (items: VaultItem[]) => void;
@@ -35,6 +36,16 @@ export const useAuthStore = create<AuthStore>((set) => ({
   setAuth: (user, accessToken) => {
     setAccessToken(accessToken);
     set({ user, isAuthenticated: true });
+  },
+
+  completeAuth: (user, accessToken, key) => {
+    setAccessToken(accessToken);
+    set({
+      user,
+      cryptoKey: key,
+      isAuthenticated: true,
+      isVaultLocked: false,
+    });
   },
 
   setUser: (user) => set({ user }),
