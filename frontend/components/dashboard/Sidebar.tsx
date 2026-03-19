@@ -1,6 +1,5 @@
 'use client';
 import { Archive, Key, Settings, Shield, Globe, CreditCard, StickyNote, User, Download, Lock, LogOut, Star } from 'lucide-react';
-import type { VaultItem } from '@/lib/types';
 import { Category } from './types';
 import { useSignOut } from './hooks/useSignOut';
 
@@ -19,7 +18,6 @@ const ELLIPSIS_STYLE = {
 interface DesktopSidebarProps {
   user: any;
   category: string;
-  vaultItems: VaultItem[];
   sidebarCounts: {
     all: number;
     login: number;
@@ -40,7 +38,7 @@ interface DesktopSidebarProps {
   isTrashView: boolean;
 }
 
-export function DesktopSidebar({ user, category, vaultItems, sidebarCounts, setCategory, handleExport, lockVault, handleLogout, onOpenSettings, onToggleFavourites, onToggleTrash, isFavouritesView, isTrashView }: Readonly<DesktopSidebarProps>) {
+export function DesktopSidebar({ user, category, sidebarCounts, setCategory, handleExport, lockVault, handleLogout, onOpenSettings, onToggleFavourites, onToggleTrash, isFavouritesView, isTrashView }: Readonly<DesktopSidebarProps>) {
   const { signingOut, handleSignout } = useSignOut(handleLogout);
 
   return (
@@ -61,9 +59,9 @@ export function DesktopSidebar({ user, category, vaultItems, sidebarCounts, setC
         <div style={{
           width: 30, height: 30, borderRadius: 8, background: 'var(--accent)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0, boxShadow: '0 2px 8px rgba(245,158,11,0.3)',
+          flexShrink: 0, boxShadow: 'var(--logo-shadow)',
         }}>
-          <Key size={15} color="#060504" strokeWidth={2.5} />
+          <Key size={15} color="var(--accent-ink)" strokeWidth={2.5} />
         </div>
         <span className="font-display" style={{ fontSize: '1.35rem', color: 'var(--text-primary)', letterSpacing: '-0.01em', lineHeight: 1 }}>
           Cipheria
@@ -158,7 +156,7 @@ export function MobileTopBar({ mobilePanel, selectedItem, onBack, lockVault, han
               width: 26, height: 26, borderRadius: 7, background: 'var(--accent)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              <Key size={13} color="#060504" strokeWidth={2.5} />
+              <Key size={13} color="var(--accent-ink)" strokeWidth={2.5} />
             </div>
             <span className="font-display" style={{ fontSize: '1.2rem', color: 'var(--text-primary)' }}>
               Cipheria
