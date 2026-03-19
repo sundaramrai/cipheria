@@ -1,4 +1,5 @@
 /** @type {import('next').NextConfig} */
+const apiProxyTarget = process.env.API_PROXY_TARGET?.trim();
 const nextConfig = {
   reactStrictMode: true,
 
@@ -11,10 +12,11 @@ const nextConfig = {
   },
 
   async rewrites() {
+    if (!apiProxyTarget) return [];
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL}/api/:path*`,
+        destination: `${apiProxyTarget.replace(/\/+$/, '')}/api/:path*`,
       },
     ];
   },
