@@ -45,7 +45,12 @@ Cipheria is a zero-knowledge password manager built with Next.js and FastAPI. En
 
 ```text
 cipheria/
-|-- api/                        # FastAPI backend
+|-- app/                        # Next.js App Router pages
+|-- components/                 # Frontend UI and hooks
+|-- lib/                        # Frontend store, API client, crypto helpers
+|-- public/                     # Static assets
+|-- styles/                     # Global styles
+|-- api/                        # FastAPI backend at /api/*
 |   |-- index.py                # App entry point
 |   |-- database.py             # SQLAlchemy models and DB session
 |   |-- crypto.py               # JWT and password helpers
@@ -55,14 +60,10 @@ cipheria/
 |   |   `-- vault.py            # /api/vault/*
 |   |-- pyproject.toml          # Python dependencies
 |   `-- uv.lock                 # Locked Python dependency graph
-|-- frontend/                   # Next.js app
-|   |-- app/
-|   |-- components/
-|   |-- lib/
-|   `-- package.json
 |-- alembic/                    # Database migrations
-|-- alembic.ini
-`-- vercel.json                 # Single-project Vercel routing
+|-- package.json                # Root Next.js app
+|-- next.config.js              # Next config; optional local API proxy
+`-- alembic.ini
 ```
 
 ## Requirements
@@ -97,20 +98,22 @@ SMTP_FROM=no-reply@example.com
 SMTP_STARTTLS=true
 ```
 
-### Frontend: `frontend/.env.local`
+### Frontend: `.env.local`
+
+Only needed for local development when the Next app runs on `3000` and the API runs separately on `8000`.
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
+
+In production on Vercel, the frontend and backend are same-origin, so `NEXT_PUBLIC_API_URL` is not needed.
 
 ## Local Development
 
 ### 1. Install frontend dependencies
 
 ```bash
-cd frontend
-npm install
-cd ..
+pnpm install
 ```
 
 ### 2. Install backend dependencies
@@ -139,8 +142,7 @@ uv run uvicorn index:app --reload --port 8000
 ### 5. Start the frontend
 
 ```bash
-cd frontend
-npm run dev
+pnpm dev
 ```
 
 Open `http://localhost:3000`.
@@ -149,19 +151,17 @@ Open `http://localhost:3000`.
 
 This repo is deployed as a single Vercel project from the repository root.
 
+No custom Vercel routing config is required. Next.js owns page routing, and the FastAPI backend is served from the root `api/` directory at `/api/*`.
+
 Set these environment variables in Vercel:
 
 - `DATABASE_URL`
 - `JWT_SECRET`
-- `ALLOWED_ORIGINS`
-- `NEXT_PUBLIC_API_URL` set to your deployment URL
+- `ALLOWED_ORIGINS` set to your production origin
 - `REDIS_URL` if Redis is enabled
 - SMTP variables if email sending is enabled
 
-The root [vercel.json](/c:/Sundaram%27s%20Workspace/Cipheria/vercel.json) routes:
-
-- `/api/*` to the FastAPI backend
-- everything else to the Next.js frontend
+Do not set `NEXT_PUBLIC_API_URL` in production unless you intentionally want to proxy API requests to a different origin.
 
 ## API Overview
 
@@ -222,10 +222,9 @@ Interactive docs are available only outside production:
 ### Frontend
 
 ```bash
-cd frontend
-npm run dev
-npm run lint
-npm run typecheck
+pnpm dev
+pnpm lint
+pnpm typecheck
 ```
 
 ### Backend
