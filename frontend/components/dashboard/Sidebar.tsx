@@ -2,6 +2,7 @@
 import { Archive, Key, Settings, Shield, Globe, CreditCard, StickyNote, User, Download, Lock, LogOut, Star } from 'lucide-react';
 import { Category } from './types';
 import { useSignOut } from './hooks/useSignOut';
+import type { UserProfile, VaultItem } from '@/lib/types';
 
 const NAV_ITEMS = [
   { id: 'all', label: 'All Items', icon: Shield },
@@ -16,7 +17,7 @@ const ELLIPSIS_STYLE = {
 } as const;
 
 interface DesktopSidebarProps {
-  user: any;
+  user: Pick<UserProfile, 'email'> | null;
   category: string;
   sidebarCounts: {
     all: number;
@@ -120,7 +121,7 @@ export function DesktopSidebar({ user, category, sidebarCounts, setCategory, han
 /* Mobile top bar */
 interface MobileTopBarProps {
   mobilePanel: 'list' | 'detail';
-  selectedItem: any;
+  selectedItem: VaultItem | null;
   onBack: () => void;
   lockVault: () => void;
   handleLogout: () => Promise<void>;
