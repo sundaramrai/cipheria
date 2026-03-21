@@ -27,7 +27,7 @@ from cache import (
     set_cached_vault_item,
     invalidate_vault_item,
 )
-from limiter import limiter
+from limiter import limiter, get_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +144,7 @@ def _log_action(db: Session, user_id, action: str, request: Request) -> None:
         AuditLog(
             user_id=user_id,
             action=action,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
             user_agent=request.headers.get("user-agent"),
         )
     )
@@ -328,7 +328,7 @@ def get_item(
 def create_item(
     body: VaultItemCreate,
     db: Annotated[Session, Depends(get_db)],
-    current_user: CurrentUser,
+    current_user: DBUser,
 ):
     user_id = str(current_user.id)
 
@@ -375,7 +375,7 @@ def update_item(
     item_id: UUID,
     body: VaultItemUpdate,
     db: Annotated[Session, Depends(get_db)],
-    current_user: CurrentUser,
+    current_user: DBUser,
 ):
     user_id = str(current_user.id)
     item_key = str(item_id)
@@ -412,7 +412,7 @@ def update_item(
 def delete_item(
     item_id: UUID,
     db: Annotated[Session, Depends(get_db)],
-    current_user: CurrentUser,
+    current_user: DBUser,
 ):
     user_id = str(current_user.id)
     item_key = str(item_id)
@@ -442,7 +442,7 @@ def delete_item(
 def restore_item(
     item_id: UUID,
     db: Annotated[Session, Depends(get_db)],
-    current_user: CurrentUser,
+    current_user: DBUser,
 ):
     user_id = str(current_user.id)
     item_key = str(item_id)
@@ -475,7 +475,7 @@ def restore_item(
 def delete_item_permanently(
     item_id: UUID,
     db: Annotated[Session, Depends(get_db)],
-    current_user: CurrentUser,
+    current_user: DBUser,
 ):
     user_id = str(current_user.id)
     item_key = str(item_id)
