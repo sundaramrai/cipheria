@@ -1,10 +1,5 @@
-import sys
 import os
 import logging
-
-sys.path.insert(0, os.path.dirname(__file__))
-logger = logging.getLogger("cipheria.api")
-
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,9 +11,24 @@ from limiter import limiter
 from routes.auth import router as auth_router
 from routes.vault import router as vault_router
 
+logger = logging.getLogger("cipheria.api")
+
 IS_PROD = (
     os.getenv("ENVIRONMENT") == "production"
 )
+
+
+def _get_allowed_origins() -> list[str]:
+    raw = os.getenv("ALLOWED_ORIGINS")
+    if raw:
+        origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+        if origins:
+            return origins
+    if IS_PROD:
+        raise RuntimeError(
+            "ALLOWED_ORIGINS environment variable must be set in production"
+        )
+    return ["http://localhost:3000"]
 
 
 @asynccontextmanager
@@ -30,6 +40,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Redis cache: not configured — all requests will hit DB")
 
+    logger.info(f"CORS allow_origins={_get_allowed_origins()}")
     yield
 
 
@@ -50,10 +61,7 @@ app.add_middleware(SlowAPIMiddleware)
 # Compress responses over 1KB
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-_allowed_origins = [
-    o.strip() for o in os.getenv("ALLOWED_ORIGINS").split(",")
-    if o.strip()
-]
+_allowed_origins = _get_allowed_origins()
 
 app.add_middleware(
     CORSMiddleware,
