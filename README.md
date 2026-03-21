@@ -1,208 +1,240 @@
 <div align="center">
 
-# 🔐 Cipheria
+# Cipheria
 
 ### Zero-Knowledge Password Manager
 
-*Your master password never leaves your device. Ever.*
+*Your master password never leaves your device.*
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](LICENSE)
 [![Live Demo](https://img.shields.io/badge/Live-cipheria.vercel.app-brightgreen)](https://cipheria.vercel.app)
-![TypeScript](https://img.shields.io/badge/TypeScript-53%25-3178c6)
-![Python](https://img.shields.io/badge/Python-23%25-3776ab)
 
 </div>
 
----
+Cipheria is a zero-knowledge password manager built with Next.js and FastAPI. Encryption and decryption happen in the browser, and the server stores only ciphertext plus metadata.
 
-Cipheria is a self-hosted, zero-knowledge password manager. All encryption and decryption happens entirely in your browser — the server stores only ciphertext and never sees your master password or vault contents.
+## Stack
 
-**Stack:** Next.js · FastAPI (Vercel Serverless) · Neon PostgreSQL
-
----
-
-## How It Works
-
-```
-Browser
-    │
-    ├── Web Crypto API
-    │       Master password → PBKDF2-SHA256 (600k iterations) → 256-bit key
-    │       Key never leaves your device
-    │
-    ├── Next.js Frontend  (Vercel)
-    │       Encrypts vault data client-side with AES-256-GCM
-    │       Sends only ciphertext to the API
-    │
-    └── FastAPI Backend  (Vercel Serverless)
-            Stores ciphertext + metadata in Neon PostgreSQL
-            Cannot decrypt — no key, ever
-```
-
-A complete database breach exposes **no plaintext passwords**.
-
----
+- Frontend: Next.js 16, React 19, TypeScript
+- Backend: FastAPI, SQLAlchemy, Redis cache, SlowAPI rate limiting
+- Database: PostgreSQL
+- Deploy: Vercel
 
 ## Security Model
 
-| Layer | Protection | Implementation |
-|---|---|---|
-| Auth password | bcrypt (cost 12) | Never stored in plain text |
-| Master password | Never sent to server | PBKDF2-SHA256, 600k iterations |
-| Vault data | AES-256-GCM | Unique 12-byte IV per item |
-| Transport | TLS 1.3 | Enforced by Vercel |
-| Session tokens | Short-lived JWTs (30 min) | Rotating refresh tokens, stored hashed |
+- Master password never leaves the client
+- Vault data is encrypted client-side with AES-256-GCM
+- Key derivation uses PBKDF2-SHA256 with 600k iterations
+- Auth verifier is stored with bcrypt
+- Access tokens are short-lived JWTs: 15 minutes
+- Refresh tokens are rotated and stored hashed
 
----
+## Main Features
 
-## Features
-
-- 🔑 **Zero-knowledge encryption** — server sees only ciphertext
-- 🗂️ **Vault management** — search, categorise, and favourite entries
-- 📤 **JSON export** — full encrypted vault export
-- 🔄 **Auto token refresh** — seamless session management
-- 📱 **Responsive UI** — works on desktop and mobile
-
----
+- Client-side encrypted vault
+- Login, card, note, and identity vault items
+- Search, favourites, trash, restore, and permanent delete
+- Email verification flow
+- Encrypted JSON vault export
+- Automatic access-token refresh
+- Optional Redis-backed caching and rate limiting
 
 ## Project Structure
 
-```
+```text
 cipheria/
-├── api/                        # FastAPI serverless backend
-│   ├── index.py                # Entry point (Mangum adapter)
-│   ├── database.py             # SQLAlchemy models + Neon connection
-│   ├── crypto.py               # JWT, bcrypt, token utilities
-│   ├── schemas.py              # Pydantic request/response schemas
-│   ├── deps.py                 # Auth dependency injection
-│   ├── routes/
-│   │   ├── auth.py             # /api/auth/*
-│   │   └── vault.py            # /api/vault/*
-│   └── requirements.txt
-│
-├── frontend/                   # Next.js app
-│   ├── app/
-│   │   ├── layout.tsx
-│   │   ├── page.tsx            # Landing page
-│   │   ├── auth/page.tsx       # Login / Register
-│   │   └── dashboard/page.tsx  # Vault dashboard
-│   ├── lib/
-│   │   ├── crypto.ts           # Web Crypto API (PBKDF2 + AES-256-GCM)
-│   │   ├── api.ts              # Axios client + auto-refresh interceptor
-│   │   └── store.ts            # Zustand state management
-│   └── styles/globals.css
-│
-├── alembic/                    # Database migrations
-├── vercel.json                 # Routes /api/* → FastAPI, rest → Next.js
-└── alembic.ini
+|-- api/                        # FastAPI backend
+|   |-- index.py                # App entry point
+|   |-- database.py             # SQLAlchemy models and DB session
+|   |-- crypto.py               # JWT and password helpers
+|   |-- deps.py                 # Auth dependencies
+|   |-- routes/
+|   |   |-- auth.py             # /api/auth/*
+|   |   `-- vault.py            # /api/vault/*
+|   |-- pyproject.toml          # Python dependencies
+|   `-- uv.lock                 # Locked Python dependency graph
+|-- frontend/                   # Next.js app
+|   |-- app/
+|   |-- components/
+|   |-- lib/
+|   `-- package.json
+|-- alembic/                    # Database migrations
+|-- alembic.ini
+`-- vercel.json                 # Single-project Vercel routing
 ```
 
----
-
-## Quick Start
-
-### Prerequisites
+## Requirements
 
 - Node.js 18+
-- Python 3.11+
-- A [Neon](https://neon.tech) PostgreSQL database
+- Python 3.14
+- [uv](https://docs.astral.sh/uv/)
+- PostgreSQL database
 
-### 1. Clone & install
+## Environment Variables
 
-```bash
-git clone https://github.com/sundaramrai/cipheria
-cd cipheria
+### Backend: `api/.env`
 
-# Install frontend dependencies
-cd frontend && npm install && cd ..
-```
+Required:
 
-### 2. Set up environment variables
-
-**`api/.env`**
 ```env
-DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb
-JWT_SECRET=<run: python -c "import secrets; print(secrets.token_hex(32))">
+DATABASE_URL=postgresql://user:pass@host/db
+JWT_SECRET=your-long-random-secret
+ALLOWED_ORIGINS=http://localhost:3000
 ```
 
-**`frontend/.env.local`**
+Optional:
+
+```env
+REDIS_URL=redis://localhost:6379/0
+
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=your-user
+SMTP_PASSWORD=your-password
+SMTP_FROM=no-reply@example.com
+SMTP_STARTTLS=true
+```
+
+### Frontend: `frontend/.env.local`
+
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-> Tables are created automatically on the first API call. No manual migration step needed.
+## Local Development
 
-### 3. Run locally
+### 1. Install frontend dependencies
 
 ```bash
-# Backend
-cd api
-pip install -r requirements.txt
-uvicorn index:app --reload --port 8000
+cd frontend
+npm install
+cd ..
+```
 
-# Frontend (separate terminal)
+### 2. Install backend dependencies
+
+```bash
+cd api
+uv sync --group dev
+cd ..
+```
+
+### 3. Run database migrations
+
+```bash
+cd api
+uv run alembic upgrade head
+cd ..
+```
+
+### 4. Start the backend
+
+```bash
+cd api
+uv run uvicorn index:app --reload --port 8000
+```
+
+### 5. Start the frontend
+
+```bash
 cd frontend
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open `http://localhost:3000`.
 
----
+## Vercel Deployment
 
-## Deploy to Vercel
+This repo is deployed as a single Vercel project from the repository root.
+
+Set these environment variables in Vercel:
+
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `ALLOWED_ORIGINS`
+- `NEXT_PUBLIC_API_URL` set to your deployment URL
+- `REDIS_URL` if Redis is enabled
+- SMTP variables if email sending is enabled
+
+The root [vercel.json](/c:/Sundaram%27s%20Workspace/Cipheria/vercel.json) routes:
+
+- `/api/*` to the FastAPI backend
+- everything else to the Next.js frontend
+
+## API Overview
+
+### Auth
+
+Base path: `/api/auth`
+
+- `POST /register`
+- `POST /login/challenge`
+- `POST /login`
+- `POST /refresh`
+- `POST /logout`
+- `POST /verify-email`
+- `POST /verify-email/request`
+- `POST /unlock`
+- `PATCH /profile`
+- `PATCH /master-password`
+- `DELETE /account`
+- `GET /me`
+
+`/forgot-password` and `/reset-password` exist but intentionally return an error because master-password reset is not supported in zero-knowledge mode.
+
+### Vault
+
+Base path: `/api/vault`
+
+- `GET /export/json`
+- `GET /`
+- `GET /{item_id}`
+- `POST /`
+- `PATCH /{item_id}`
+- `DELETE /{item_id}`
+- `POST /{item_id}/restore`
+- `DELETE /{item_id}/permanent`
+
+List endpoint supports:
+
+- `category=login|card|note|identity`
+- `search=...`
+- `favourites_only=true`
+- `deleted_only=true`
+- `page`
+- `page_size`
+
+### Health
+
+- `GET /api/health`
+
+### Docs
+
+Interactive docs are available only outside production:
+
+- `http://localhost:8000/api/docs`
+- `http://localhost:8000/api/redoc`
+
+## Useful Commands
+
+### Frontend
 
 ```bash
-npm i -g vercel
-vercel login
-vercel
-
-# Add environment variables
-vercel env add DATABASE_URL
-vercel env add JWT_SECRET
-vercel env add NEXT_PUBLIC_API_URL   # set to your Vercel deployment URL
+cd frontend
+npm run dev
+npm run lint
+npm run typecheck
 ```
 
-`vercel.json` automatically routes `/api/*` requests to FastAPI and everything else to Next.js.
+### Backend
 
-Interactive API docs are available at: `https://<your-deployment>.vercel.app/api/docs`
-
----
-
-## API Reference
-
-**Auth** — `/api/auth/`
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/register` | Create a new account |
-| `POST` | `/login` | Authenticate and receive tokens |
-| `POST` | `/refresh` | Rotate access token |
-| `POST` | `/logout` | Invalidate refresh token |
-| `GET` | `/me` | Get current user info |
-
-**Vault** — `/api/vault/`
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/` | List vault items (supports `?search=`, `?category=`, `?favourites_only=true`) |
-| `POST` | `/` | Add a new vault item |
-| `GET` | `/:id` | Get a single item |
-| `PATCH` | `/:id` | Update an item |
-| `DELETE` | `/:id` | Delete an item |
-| `GET` | `/export/json` | Export full vault as JSON |
-
----
-
-## Roadmap
-
-- [ ] TOTP two-factor authentication
-- [ ] Passkey / WebAuthn support
-- [ ] Secure credential sharing (public-key encrypted)
-- [ ] Password health dashboard with HIBP breach detection
-- [ ] iOS / Android app (React Native)
-- [ ] Team / organisation vaults
-
----
+```bash
+cd api
+uv sync --group dev
+uv run ruff check .
+uv run alembic upgrade head
+uv run uvicorn index:app --reload --port 8000
+```
 
 ## License
 
