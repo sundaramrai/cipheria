@@ -20,7 +20,7 @@ export function useIdleTimer(isVaultLocked: boolean, lockVault: () => void) {
             if (timerRef.current) clearTimeout(timerRef.current);
             timerRef.current = setTimeout(() => {
                 lockVault();
-                toastService.notify('Vault auto-locked after 5 min of inactivity', { icon: '🔒' });
+                toastService.info('Vault auto-locked after 5 min of inactivity');
             }, IDLE_MS);
         };
 
@@ -33,3 +33,4 @@ export function useIdleTimer(isVaultLocked: boolean, lockVault: () => void) {
         };
     }, [isVaultLocked, lockVault]);
 }
+
