@@ -100,7 +100,7 @@ SMTP_STARTTLS=true
 
 ### Frontend: `.env.local`
 
-Only needed for local development when the Next app runs on `3000` and the API runs separately on `8000`.
+Only needed for local development when the Next app runs on `3000` and the API runs separately on `8000`. The Next dev server rewrites `/api/*` to this origin.
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
@@ -151,7 +151,16 @@ Open `http://localhost:3000`.
 
 This repo is deployed as a single Vercel project from the repository root.
 
-No custom Vercel routing config is required. Next.js owns page routing, and the FastAPI backend is served from the root `api/` directory at `/api/*`.
+The repository uses [vercel.json](/c:/Sundaram%27s%20Workspace/Cipheria/vercel.json) with `experimentalServices` so Vercel can serve:
+
+- the Next.js app from `/`
+- the FastAPI backend from `/api/*`
+
+Dashboard requirements:
+
+- set the project Framework Preset to `Services`
+- make sure your Vercel account/project has access to Services
+- keep the project Root Directory as the repository root
 
 Set these environment variables in Vercel:
 
@@ -161,7 +170,7 @@ Set these environment variables in Vercel:
 - `REDIS_URL` if Redis is enabled
 - SMTP variables if email sending is enabled
 
-Do not set `NEXT_PUBLIC_API_URL` in production unless you intentionally want to proxy API requests to a different origin.
+Do not set `NEXT_PUBLIC_API_URL` in production. The Services config keeps frontend and backend on the same origin, and the local dev rewrite is disabled in production.
 
 ## API Overview
 
@@ -212,10 +221,10 @@ List endpoint supports:
 
 ### Docs
 
-Interactive docs are available only outside production:
+Interactive docs are available only outside production. In local backend development they are served directly from FastAPI:
 
-- `http://localhost:8000/api/docs`
-- `http://localhost:8000/api/redoc`
+- `http://localhost:8000/docs`
+- `http://localhost:8000/redoc`
 
 ## Useful Commands
 
