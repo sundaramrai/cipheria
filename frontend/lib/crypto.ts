@@ -144,14 +144,14 @@ export function generatePassword(options: {
 const _hibpCache = new Map<string, number>();
 
 export async function checkHIBP(password: string): Promise<number> {
-  const cached = _hibpCache.get(password);
-  if (typeof cached === 'number') return cached;
   const encoded = new TextEncoder().encode(password);
   const hashBuffer = await crypto.subtle.digest('SHA-1', encoded);
   const hashHex = Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
     .toUpperCase();
+  const cached = _hibpCache.get(hashHex);
+  if (typeof cached === 'number') return cached;
   const prefix = hashHex.slice(0, 5);
   const suffix = hashHex.slice(5);
 
@@ -163,7 +163,7 @@ export async function checkHIBP(password: string): Promise<number> {
   const text = await response.text();
   const line = text.split('\n').find((l) => l.trimStart().startsWith(suffix));
   const count = line ? Number.parseInt(line.split(':')[1], 10) : 0;
-  _hibpCache.set(password, count);
+  _hibpCache.set(hashHex, count);
   return count;
 }
 
