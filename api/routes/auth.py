@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Cookie
-from jose import JWTError
+from jwt import InvalidTokenError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -458,7 +458,7 @@ def refresh(
             _reject_refresh("Invalid token type")
         user_id = payload.get("sub")
         jti = payload.get("jti", "")
-    except JWTError:
+    except InvalidTokenError:
         _reject_refresh("Invalid refresh token")
 
     # Validate sub is a well-formed UUID — malformed values cause DB errors
