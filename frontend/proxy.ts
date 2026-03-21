@@ -1,23 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 /**
  * Pass-through proxy hook.
  *
- * Authoritative rate limiting is enforced by the backend's Redis-backed
- * slowapi limiter. We intentionally avoid duplicating an in-memory limiter
- * here because it would only be per-instance and could drift from backend
- * policy.
+ * Session validation is handled by the frontend bootstrap + backend refresh
+ * flow. Redirecting from here based only on the presence of a refresh cookie
+ * can trap users in stale-cookie redirect loops after the server session has
+ * expired.
  */
-export function proxy(request: NextRequest) {
-    if (request.nextUrl.pathname === '/auth') {
-        const mode = request.nextUrl.searchParams.get('mode');
-        const hasRefreshCookie = Boolean(request.cookies.get('refresh_token')?.value);
-
-        if (!mode && hasRefreshCookie) {
-            return NextResponse.redirect(new URL('/dashboard', request.url));
-        }
-    }
-
+export function proxy() {
     return NextResponse.next();
 }
 
