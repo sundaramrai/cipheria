@@ -51,9 +51,9 @@ app = FastAPI(
     title="Cipheria API",
     description="Secure serverless password manager backend",
     version="1.0.0",
-    docs_url=None if IS_PROD else "/api/docs",
-    redoc_url=None if IS_PROD else "/api/redoc",
-    openapi_url=None if IS_PROD else "/api/openapi.json",
+    docs_url=None if IS_PROD else "/docs",
+    redoc_url=None if IS_PROD else "/redoc",
+    openapi_url=None if IS_PROD else "/openapi.json",
     lifespan=lifespan,
 )
 
@@ -74,11 +74,14 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
-app.include_router(auth_router, prefix="/api")
-app.include_router(vault_router, prefix="/api")
+# The Vercel Services config mounts this app under /api in production.
+# Keep the FastAPI app itself rooted at / so local dev remains simple and
+# external routing can add /api without double-prefixing.
+app.include_router(auth_router)
+app.include_router(vault_router)
 
 
-@app.get("/api/health")
+@app.get("/health")
 async def health():
     from cache import cache_ping, get_redis
     redis_ok = cache_ping() if get_redis() else None
