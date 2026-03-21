@@ -309,10 +309,38 @@ function AuthForm({ initialTab }: Readonly<{ initialTab: 'login' | 'register' }>
 function AuthPageContent() {
   const router = useRouter();
   const params = useSearchParams();
-  const { isAuthenticated, cryptoKey } = useAuthStore();
+  const { isAuthenticated, cryptoKey, restoreSession } = useAuthStore();
+  const [checkingSession, setCheckingSession] = useState(true);
   const mode = params.get('mode');
   const token = params.get('token') ?? '';
   const initialTab = params.get('tab') === 'register' ? 'register' : 'login';
+
+  useEffect(() => {
+    if (mode) {
+      setCheckingSession(false);
+      return;
+    }
+
+    let active = true;
+    if (isAuthenticated) {
+      setCheckingSession(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    void restoreSession().then((ok) => {
+      if (!active) return;
+      setCheckingSession(false);
+      if (ok) {
+        router.replace('/dashboard');
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [isAuthenticated, mode, restoreSession, router]);
 
   useEffect(() => {
     if (isAuthenticated && !mode) {
@@ -322,6 +350,15 @@ function AuthPageContent() {
 
   if (mode === 'verify-email') return <VerifyEmailView token={token} />;
   if (mode === 'reset-password') return <ResetNotSupportedView />;
+  if (checkingSession) {
+    return (
+      <AuxShell title="Opening Cipheria" centered>
+        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          Checking your session...
+        </p>
+      </AuxShell>
+    );
+  }
   if (isAuthenticated && !mode && cryptoKey) return null;
   if (isAuthenticated && !mode && !cryptoKey) {
     return (
