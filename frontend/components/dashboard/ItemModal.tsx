@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Globe, CreditCard, StickyNote, User, Plus, Edit2, X, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { generatePassword, passwordStrength } from '@/lib/crypto';
+import type { ItemForm } from './types';
 
 /* Field label */
 export function FieldLabel({ htmlFor, children }: Readonly<{ htmlFor: string; children: React.ReactNode }>) {
@@ -18,14 +19,18 @@ export function FieldLabel({ htmlFor, children }: Readonly<{ htmlFor: string; ch
 }
 
 /* Category picker */
-const CATEGORY_CONFIG = [
+const CATEGORY_CONFIG: ReadonlyArray<{
+  value: ItemForm['category'];
+  label: string;
+  icon: typeof Globe;
+}> = [
   { value: 'login', label: 'Login', icon: Globe },
   { value: 'card', label: 'Card', icon: CreditCard },
   { value: 'note', label: 'Note', icon: StickyNote },
   { value: 'identity', label: 'Identity', icon: User },
 ] as const;
 
-export function CategoryPicker({ value, onChange }: Readonly<{ value: string; onChange: (v: string) => void }>) {
+export function CategoryPicker({ value, onChange }: Readonly<{ value: ItemForm['category']; onChange: (v: ItemForm['category']) => void }>) {
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
       {CATEGORY_CONFIG.map(({ value: v, label, icon: Icon }) => {
@@ -161,7 +166,15 @@ function StrengthBar({ password }: Readonly<{ password: string }>) {
   );
 }
 
-function useFormField<T extends Record<string, any>>(form: T, setForm: (f: T) => void) {
+type PasswordGeneratorOptions = {
+  length: number;
+  uppercase: boolean;
+  lowercase: boolean;
+  numbers: boolean;
+  symbols: boolean;
+};
+
+function useFormField<T extends ItemForm>(form: T, setForm: (f: T) => void) {
   return useCallback(
     (key: keyof T) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm({ ...form, [key]: e.target.value }),
@@ -170,7 +183,7 @@ function useFormField<T extends Record<string, any>>(form: T, setForm: (f: T) =>
 }
 
 /* Login form fields */
-function LoginFormFields({ form, setForm, genOptions }: Readonly<{ form: any; setForm: (f: any) => void; genOptions: any }>) {
+function LoginFormFields({ form, setForm, genOptions }: Readonly<{ form: ItemForm; setForm: (f: ItemForm) => void; genOptions: PasswordGeneratorOptions }>) {
   const [showPw, setShowPw] = useState(false);
   const field = useFormField(form, setForm);
   const toggleShow = useCallback(() => setShowPw(v => !v), []);
@@ -220,7 +233,7 @@ function LoginFormFields({ form, setForm, genOptions }: Readonly<{ form: any; se
 }
 
 /* Card form fields */
-function CardFormFields({ form, setForm, prefix }: Readonly<{ form: any; setForm: (f: any) => void; prefix: string }>) {
+function CardFormFields({ form, setForm, prefix }: Readonly<{ form: ItemForm; setForm: (f: ItemForm) => void; prefix: string }>) {
   const field = useFormField(form, setForm);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -252,7 +265,7 @@ function CardFormFields({ form, setForm, prefix }: Readonly<{ form: any; setForm
 }
 
 /* Identity form fields */
-function IdentityFormFields({ form, setForm, prefix }: Readonly<{ form: any; setForm: (f: any) => void; prefix: string }>) {
+function IdentityFormFields({ form, setForm, prefix }: Readonly<{ form: ItemForm; setForm: (f: ItemForm) => void; prefix: string }>) {
   const field = useFormField(form, setForm);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -284,11 +297,11 @@ function IdentityFormFields({ form, setForm, prefix }: Readonly<{ form: any; set
 
 /* Shared form body */
 export function ItemFormBody({ form, setForm, genOptions, submitLabel, submitting, onClose }: Readonly<{
-  form: any; setForm: (f: any) => void; genOptions: any;
+  form: ItemForm; setForm: (f: ItemForm) => void; genOptions: PasswordGeneratorOptions;
   submitLabel: string; submitting: boolean; onClose: () => void;
 }>) {
   const field = useFormField(form, setForm);
-  const handleCategoryChange = useCallback((v: string) => setForm({ ...form, category: v }), [form, setForm]);
+  const handleCategoryChange = useCallback((v: ItemForm['category']) => setForm({ ...form, category: v }), [form, setForm]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -332,10 +345,10 @@ export function ItemFormBody({ form, setForm, genOptions, submitLabel, submittin
 
 /* Modal exports */
 interface ItemModalProps {
-  form: any;
-  setForm: (f: any) => void;
+  form: ItemForm;
+  setForm: (f: ItemForm) => void;
   saving: boolean;
-  genOptions: any;
+  genOptions: PasswordGeneratorOptions;
   onSubmit: (e: React.SyntheticEvent) => void;
   onClose: () => void;
   mode: 'add' | 'edit';
@@ -361,14 +374,14 @@ function ItemModal({ form, setForm, saving, genOptions, onSubmit, onClose, mode 
 }
 
 export function AddItemModal({ newItem, setNewItem, savingItem, genOptions, onSubmit, onClose }: Readonly<{
-  newItem: any; setNewItem: (f: any) => void; savingItem: boolean; genOptions: any;
+  newItem: ItemForm; setNewItem: (f: ItemForm) => void; savingItem: boolean; genOptions: PasswordGeneratorOptions;
   onSubmit: (e: React.SyntheticEvent) => void; onClose: () => void;
 }>) {
   return <ItemModal mode="add" form={newItem} setForm={setNewItem} saving={savingItem} genOptions={genOptions} onSubmit={onSubmit} onClose={onClose} />;
 }
 
 export function EditItemModal({ editForm, setEditForm, updatingItem, genOptions, onSubmit, onClose }: Readonly<{
-  editForm: any; setEditForm: (f: any) => void; updatingItem: boolean; genOptions: any;
+  editForm: ItemForm; setEditForm: (f: ItemForm) => void; updatingItem: boolean; genOptions: PasswordGeneratorOptions;
   onSubmit: (e: React.SyntheticEvent) => void; onClose: () => void;
 }>) {
   return <ItemModal mode="edit" form={editForm} setForm={setEditForm} saving={updatingItem} genOptions={genOptions} onSubmit={onSubmit} onClose={onClose} />;
