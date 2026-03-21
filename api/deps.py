@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Annotated, Optional, Union
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError
+from jwt import InvalidTokenError
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import get_db, User
@@ -80,7 +80,7 @@ def get_current_token_user(
         if not user_id:
             raise auth_exception()
         return TokenUser(user_id)
-    except JWTError:
+    except InvalidTokenError:
         raise auth_exception()
 
 
