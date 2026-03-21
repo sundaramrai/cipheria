@@ -1,5 +1,10 @@
 {
   "version": 2,
+  "functions": {
+    "api/**/*.py": {
+      "excludeFiles": "{frontend/**,node_modules/**,.next/**,.vercel/**,.git/**,api/.venv/**,api/.ruff_cache/**,api/__pycache__/**,alembic/**,alembic.ini,**/*.pyc}"
+    }
+  },
   "regions": [
     "sin1"
   ],
@@ -9,7 +14,7 @@
       "use": "@vercel/python",
       "config": {
         "maxLambdaSize": "15mb",
-        "runtime": "python3.12",
+        "runtime": "python3.14",
         "maxDuration": 10
       }
     },
