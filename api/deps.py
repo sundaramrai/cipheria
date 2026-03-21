@@ -150,5 +150,6 @@ def get_current_db_user(
     return user
 
 
-CurrentUser = Annotated[TokenUser, Depends(get_current_token_user)]
+ReadUser = Annotated[Union[CachedUser, User], Depends(get_current_user_from_db)]
+CurrentUser = ReadUser
 DBUser = Annotated[User, Depends(get_current_db_user)]
