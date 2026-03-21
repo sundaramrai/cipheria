@@ -12,7 +12,6 @@ const AUTO_REFRESH_EXCLUDED_PATHS = [
   '/api/auth/login/challenge',
   '/api/auth/register',
   '/api/auth/verify-email',
-  '/api/auth/unlock',
 ] as const;
 
 /**
@@ -64,6 +63,7 @@ api.interceptors.response.use(
           promise.finally(() => { _refreshPromise = null; });
         }
         const newToken = await _refreshPromise;
+        original.headers = original.headers ?? {};
         original.headers.Authorization = `Bearer ${newToken}`;
         return api(original);
       } catch {
