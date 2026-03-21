@@ -1,10 +1,5 @@
 {
   "version": 2,
-  "functions": {
-    "api/**/*.py": {
-      "excludeFiles": "{frontend/**,node_modules/**,.next/**,.vercel/**,.git/**,api/.venv/**,api/.ruff_cache/**,api/__pycache__/**,alembic/**,alembic.ini,**/*.pyc}"
-    }
-  },
   "regions": [
     "sin1"
   ],
