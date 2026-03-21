@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
-from jose import jwt
+import jwt
 
 # Hard-fail at startup if JWT_SECRET is not set.
 # An ephemeral fallback would silently invalidate all tokens on every
