@@ -4,6 +4,7 @@
 
 # Python / FastAPI
 venv/
+.venv/
 __pycache__/
 
 # Next.js / Node
