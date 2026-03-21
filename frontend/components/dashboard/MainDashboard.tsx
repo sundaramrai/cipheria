@@ -2,12 +2,15 @@
 import { useState, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import { RotateCcw, Search, Plus, Shield, Globe, CreditCard, StickyNote, User, Trash2, Download, Star, Edit2, ChevronRight } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { checkHIBP } from '@/lib/crypto';
 import { CATEGORY_ICONS } from './types';
 import { DesktopSidebar, MobileTopBar } from './Sidebar';
 import { Pagination } from './Pagination';
 import { Field, HibpCheck } from './Field';
 import { AddItemModal, EditItemModal } from './ItemModal';
+import type { DecryptedPayload, SidebarCounts, UserProfile, VaultItem } from '@/lib/types';
+import type { Category, ItemForm } from './types';
 
 const CATEGORIES = [
     { id: 'all', label: 'All', icon: Shield },
@@ -19,6 +22,15 @@ const CATEGORIES = [
 
 const ELLIPSIS_STYLE = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const;
 const passthroughImageLoader = ({ src }: { src: string }) => src;
+type HibpState = { checking: boolean; count: number | null };
+type MaybePromiseVoid = void | Promise<void>;
+type PasswordGeneratorOptions = {
+    length: number;
+    uppercase: boolean;
+    lowercase: boolean;
+    numbers: boolean;
+    symbols: boolean;
+};
 
 function SearchSkeleton({ iconSize = 36 }: Readonly<{ iconSize?: number }>) {
     return (
@@ -59,7 +71,7 @@ function FaviconImage({ src, size }: Readonly<{ src: string; size: number }>) {
     );
 }
 
-function ItemIcon({ item, size }: Readonly<{ item: any; size: number }>) {
+function ItemIcon({ item, size }: Readonly<{ item: VaultItem; size: number }>) {
     const Icon = CATEGORY_ICONS[item.category] || Globe;
     const px = Math.round(size * 0.55);
     return (
@@ -75,9 +87,9 @@ function ItemIcon({ item, size }: Readonly<{ item: any; size: number }>) {
 }
 
 function ItemButton({ item, isSelected, isMobile, iconSize, fontSize, padding, onSelect }: Readonly<{
-    item: any; isSelected: boolean; isMobile: boolean;
+    item: VaultItem; isSelected: boolean; isMobile: boolean;
     iconSize: number; fontSize: string; padding: string;
-    onSelect: (item: any) => void;
+    onSelect: (item: VaultItem) => void;
 }>) {
     const handleClick = useCallback(() => onSelect(item), [onSelect, item]);
     return (
@@ -108,10 +120,10 @@ function ItemButton({ item, isSelected, isMobile, iconSize, fontSize, padding, o
 }
 
 function ItemList({ items, loading, selectedId, onSelect, variant }: Readonly<{
-    items: any[];
+    items: VaultItem[];
     loading: boolean;
     selectedId?: string;
-    onSelect: (item: any) => void;
+    onSelect: (item: VaultItem) => void;
     variant: 'mobile' | 'desktop';
 }>) {
     const isMobile = variant === 'mobile';
@@ -146,9 +158,9 @@ function ItemList({ items, loading, selectedId, onSelect, variant }: Readonly<{
 }
 
 function FieldRows({ d, copy, hibp, onCheckHibp }: Readonly<{
-    d: any;
+    d: DecryptedPayload;
     copy: (val: string, label: string) => () => void;
-    hibp: { checking: boolean; count: number | null };
+    hibp: HibpState;
     onCheckHibp: () => void;
 }>) {
     return (
@@ -173,10 +185,10 @@ function FieldRows({ d, copy, hibp, onCheckHibp }: Readonly<{
 }
 
 function ItemDetailFields({ selectedItem, copyToClipboard, hibp, setHibp }: Readonly<{
-    selectedItem: any;
-    copyToClipboard: (text: string, label: string) => void;
-    hibp: { checking: boolean; count: number | null };
-    setHibp: (v: { checking: boolean; count: number | null }) => void;
+    selectedItem: VaultItem;
+    copyToClipboard: (text: string, label: string) => void | Promise<void>;
+    hibp: HibpState;
+    setHibp: (v: HibpState) => void;
 }>) {
     const d = selectedItem.decrypted ?? {};
     const password = typeof d.password === 'string' ? d.password : '';
@@ -199,7 +211,7 @@ function ItemDetailFields({ selectedItem, copyToClipboard, hibp, setHibp }: Read
 }
 
 function ItemDetailActions({ item, btnPad, iconPx, deletingId, onFav, onEdit, onDelete, onRestore, onDeletePermanent }: Readonly<{
-    item: any; btnPad: string; iconPx: number; deletingId: string | null;
+    item: VaultItem; btnPad: string; iconPx: number; deletingId: string | null;
     onFav: () => void; onEdit: () => void; onDelete: () => void;
     onRestore: () => void; onDeletePermanent: () => void;
 }>) {
@@ -237,24 +249,32 @@ function ItemDetailActions({ item, btnPad, iconPx, deletingId, onFav, onEdit, on
 }
 
 function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, handleDelete, handleRestoreItem, handleDeletePermanent, deletingId }: Readonly<{
-    item: any;
+    item: VaultItem;
     isMobile?: boolean;
-    handleToggleFav: (item: any) => void;
-    handleOpenEdit: (item: any) => void;
-    handleDelete: (id: string, cb?: () => void) => void;
-    handleRestoreItem?: (id: string) => void;
-    handleDeletePermanent?: (id: string) => void;
+    handleToggleFav: (item: VaultItem) => MaybePromiseVoid;
+    handleOpenEdit: (item: VaultItem) => void;
+    handleDelete: (id: string, cb?: () => void) => MaybePromiseVoid;
+    handleRestoreItem?: (id: string) => MaybePromiseVoid;
+    handleDeletePermanent?: (id: string) => MaybePromiseVoid;
     deletingId: string | null;
 }>) {
     const Icon = CATEGORY_ICONS[item.category] || Globe;
     const iconSize = isMobile ? 48 : 52;
     const btnPad = isMobile ? '8px 10px' : '8px 12px';
     const iconPx = isMobile ? 15 : 16;
-    const onFav = useCallback(() => handleToggleFav(item), [handleToggleFav, item]);
+    const onFav = useCallback(() => {
+        void handleToggleFav(item);
+    }, [handleToggleFav, item]);
     const onEdit = useCallback(() => handleOpenEdit(item), [handleOpenEdit, item]);
-    const onDelete = useCallback(() => handleDelete(item.id), [handleDelete, item.id]);
-    const onRestore = useCallback(() => handleRestoreItem?.(item.id), [handleRestoreItem, item.id]);
-    const onDeletePermanent = useCallback(() => handleDeletePermanent?.(item.id), [handleDeletePermanent, item.id]);
+    const onDelete = useCallback(() => {
+        void handleDelete(item.id);
+    }, [handleDelete, item.id]);
+    const onRestore = useCallback(() => {
+        void handleRestoreItem?.(item.id);
+    }, [handleRestoreItem, item.id]);
+    const onDeletePermanent = useCallback(() => {
+        void handleDeletePermanent?.(item.id);
+    }, [handleDeletePermanent, item.id]);
 
     return (
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: isMobile ? 24 : 32 }}>
@@ -288,18 +308,18 @@ function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, han
 }
 
 interface ItemDetailPanelProps {
-    selectedItem: any;
+    selectedItem: VaultItem | null;
     selectedItemLoading: boolean;
     isMobile?: boolean;
-    handleToggleFav: (item: any) => void;
-    handleOpenEdit: (item: any) => void;
-    handleDelete: (id: string, cb?: () => void) => void;
-    handleRestoreItem?: (id: string) => void;
-    handleDeletePermanent?: (id: string) => void;
+    handleToggleFav: (item: VaultItem) => MaybePromiseVoid;
+    handleOpenEdit: (item: VaultItem) => void;
+    handleDelete: (id: string, cb?: () => void) => MaybePromiseVoid;
+    handleRestoreItem?: (id: string) => MaybePromiseVoid;
+    handleDeletePermanent?: (id: string) => MaybePromiseVoid;
     deletingId: string | null;
-    copyToClipboard: (text: string, label: string) => void;
-    hibp: { checking: boolean; count: number | null };
-    setHibp: (v: { checking: boolean; count: number | null }) => void;
+    copyToClipboard: (text: string, label: string) => MaybePromiseVoid;
+    hibp: HibpState;
+    setHibp: (v: HibpState) => void;
     onDeleteSuccess?: () => void;
 }
 
@@ -337,11 +357,11 @@ function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, handleTo
     );
 }
 
-function CategoryPill({ id, label, icon: Icon, isActive, onSelect }: Readonly<{
-    id: string; label: string; icon: any;
-    isActive: boolean; onSelect: (id: string) => void;
+function CategoryPill({ label, icon: Icon, isActive, onSelect }: Readonly<{
+    label: string; icon: LucideIcon;
+    isActive: boolean; onSelect: () => void;
 }>) {
-    const handleClick = useCallback(() => onSelect(id), [onSelect, id]);
+    const handleClick = useCallback(() => onSelect(), [onSelect]);
     return (
         <button onClick={handleClick} style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
@@ -357,7 +377,56 @@ function CategoryPill({ id, label, icon: Icon, isActive, onSelect }: Readonly<{
     );
 }
 
-export function MainDashboard(props: Readonly<any>) {
+interface MainDashboardProps {
+    user: UserProfile | null;
+    category: Category;
+    setCategory: (category: Category) => MaybePromiseVoid;
+    searchValue: string;
+    onSearchChange: (value: string) => void;
+    handleExport: () => MaybePromiseVoid;
+    onOpenSettings: () => void;
+    onToggleFavourites: () => MaybePromiseVoid;
+    onToggleTrash: () => MaybePromiseVoid;
+    isFavouritesView: boolean;
+    isTrashView: boolean;
+    lockVault: () => void;
+    handleLogout: () => Promise<void>;
+    vaultItems: VaultItem[];
+    sidebarCounts: SidebarCounts;
+    selectedItem: VaultItem | null;
+    handleSelectItem: (item: VaultItem) => MaybePromiseVoid;
+    selectedItemLoading: boolean;
+    handleToggleFav: (item: VaultItem) => MaybePromiseVoid;
+    handleOpenEdit: (item: VaultItem) => void;
+    handleDelete: (id: string, cb?: () => void) => MaybePromiseVoid;
+    handleRestoreItem: (id: string) => MaybePromiseVoid;
+    handleDeletePermanent: (id: string) => MaybePromiseVoid;
+    deletingId: string | null;
+    copyToClipboard: (text: string, label: string) => MaybePromiseVoid;
+    hibp: HibpState;
+    setHibp: (value: HibpState) => void;
+    showAddModal: boolean;
+    setShowAddModal: (value: boolean) => void;
+    newItem: ItemForm;
+    setNewItem: (form: ItemForm) => void;
+    savingItem: boolean;
+    genOptions: PasswordGeneratorOptions;
+    handleAddItem: (e: React.SyntheticEvent) => MaybePromiseVoid;
+    showEditModal: boolean;
+    setShowEditModal: (value: boolean) => void;
+    editForm: ItemForm | null;
+    setEditForm: (form: ItemForm | null) => void;
+    updatingItem: boolean;
+    handleEditItem: (e: React.SyntheticEvent) => MaybePromiseVoid;
+    filteredItems: VaultItem[];
+    page: number;
+    totalPages: number;
+    onPageChange: (page: number) => MaybePromiseVoid;
+    isSearchActive: boolean;
+    searchLoading: boolean;
+}
+
+export function MainDashboard(props: Readonly<MainDashboardProps>) {
     const {
         user, category, searchValue, onSearchChange, handleExport, lockVault, handleLogout,
         onOpenSettings, onToggleFavourites, onToggleTrash, isFavouritesView, isTrashView,
@@ -369,9 +438,18 @@ export function MainDashboard(props: Readonly<any>) {
     } = props;
 
     const [mobilePanel, setMobilePanel] = useState<'list' | 'detail'>('list');
+    const categoryPills = useMemo(
+        () => CATEGORIES.map(categoryOption => ({
+            ...categoryOption,
+            onSelect: () => {
+                void setCategory(categoryOption.id);
+            },
+        })),
+        [setCategory],
+    );
 
-    const handleSelectItemMobile = useCallback((item: any) => {
-        handleSelectItem(item);
+    const handleSelectItemMobile = useCallback((item: VaultItem) => {
+        void handleSelectItem(item);
         setMobilePanel('detail');
     }, [handleSelectItem]);
 
@@ -380,8 +458,12 @@ export function MainDashboard(props: Readonly<any>) {
     const handleEditClose = useCallback(() => { setShowEditModal(false); setEditForm(null); }, [setShowEditModal, setEditForm]);
     const handleOpenAddModal = useCallback(() => setShowAddModal(true), [setShowAddModal]);
     const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => onSearchChange(e.target.value), [onSearchChange]);
-    const handleFavouritesPill = useCallback(() => onToggleFavourites(), [onToggleFavourites]);
-    const handleTrashPill = useCallback(() => onToggleTrash(), [onToggleTrash]);
+    const handleFavouritesPill = useCallback(() => {
+        void onToggleFavourites();
+    }, [onToggleFavourites]);
+    const handleTrashPill = useCallback(() => {
+        void onToggleTrash();
+    }, [onToggleTrash]);
 
     const detailPanelProps: Omit<ItemDetailPanelProps, 'isMobile' | 'handleDelete' | 'onDeleteSuccess'> = {
         selectedItem, selectedItemLoading,
@@ -421,13 +503,13 @@ export function MainDashboard(props: Readonly<any>) {
             }}>
                 {/* Category pills */}
                 <div style={{ overflowX: 'auto', display: 'flex', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-                    {CATEGORIES.map(({ id, label, icon }) => (
-                        <CategoryPill key={id} id={id} label={label} icon={icon}
-                            isActive={!isTrashView && !isFavouritesView && category === id} onSelect={setCategory} />
+                    {categoryPills.map(({ id, label, icon, onSelect }) => (
+                        <CategoryPill key={id} label={label} icon={icon}
+                            isActive={!isTrashView && !isFavouritesView && category === id} onSelect={onSelect} />
                     ))}
-                    <CategoryPill id="favourites" label="Favourites" icon={Star}
+                    <CategoryPill label="Favourites" icon={Star}
                         isActive={isFavouritesView} onSelect={handleFavouritesPill} />
-                    <CategoryPill id="trash" label="Trash" icon={Trash2}
+                    <CategoryPill label="Trash" icon={Trash2}
                         isActive={isTrashView} onSelect={handleTrashPill} />
                 </div>
 
