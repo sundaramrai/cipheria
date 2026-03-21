@@ -117,7 +117,7 @@ def _prune_revoked_tokens(db: Session, user_id) -> None:
     """
     db.query(RefreshToken).filter(
         RefreshToken.user_id == user_id,
-        RefreshToken.revoked == True,
+        RefreshToken.revoked,
     ).delete(synchronize_session=False)
 
 
@@ -487,7 +487,7 @@ def refresh(
             db.query(RefreshToken)
             .filter(
                 RefreshToken.token_hash == token_hash,
-                RefreshToken.revoked == False,
+                ~RefreshToken.revoked,
                 RefreshToken.expires_at > datetime.now(timezone.utc),
             )
             .first()
