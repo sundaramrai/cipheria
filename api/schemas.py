@@ -63,6 +63,11 @@ class VerifyEmailRequest(BaseModel):
     token: str = Field(..., min_length=16, max_length=512)
 
 
+class VerifyEmailResponse(BaseModel):
+    message: str
+    user: UserResponse
+
+
 class UpdateProfileRequest(BaseModel):
     full_name: Optional[str] = Field(None, max_length=128)
     master_hint: Optional[str] = Field(None, max_length=256)
