@@ -55,6 +55,8 @@ type ViewRequest = {
   favouritesOnly: boolean;
 };
 
+const PAGE_SIZE = 50;
+
 function FullScreenMessage({ message }: Readonly<{ message: string }>) {
   return (
     <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
@@ -86,6 +88,83 @@ function getViewCacheKey(view: ViewRequest): CachedViewKey | `category:${Exclude
   if (view.deletedOnly) return 'trash';
   if (view.favouritesOnly) return 'favourites';
   return view.category === 'all' ? 'all' : `category:${view.category}`;
+}
+
+function sortByUpdatedDesc(items: VaultItem[]): VaultItem[] {
+  return [...items].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+}
+
+function itemMatchesView(item: VaultItem, view: ViewRequest): boolean {
+  if (view.deletedOnly) return Boolean(item.is_deleted);
+  if (item.is_deleted) return false;
+  if (view.favouritesOnly && !item.is_favourite) return false;
+  return view.category === 'all' || item.category === view.category;
+}
+
+function itemMatchesSearch(item: VaultItem, term: string): boolean {
+  if (!term) return true;
+  return item.name.toLowerCase().includes(term.toLowerCase());
+}
+
+function reconcileVisibleItems(
+  items: VaultItem[],
+  before: VaultItem | null,
+  after: VaultItem | null,
+  view: ViewRequest,
+  searchTerm: string,
+  page: number,
+): VaultItem[] {
+  const existing = items.find((item) => item.id === before?.id || item.id === after?.id);
+  let nextItems = before
+    ? items.filter((item) => item.id !== before.id)
+    : [...items];
+
+  if (
+    after &&
+    itemMatchesView(after, view) &&
+    itemMatchesSearch(after, searchTerm) &&
+    (page === 1 || Boolean(existing))
+  ) {
+    nextItems = sortByUpdatedDesc([after, ...nextItems]);
+  }
+
+  return page === 1 ? nextItems.slice(0, PAGE_SIZE) : nextItems;
+}
+
+function computeTotalPages(totalItems: number): number {
+  return totalItems === 0 ? 0 : Math.ceil(totalItems / PAGE_SIZE);
+}
+
+function applySidebarDelta(counts: SidebarCounts, before: VaultItem | null, after: VaultItem | null): SidebarCounts {
+  const next = { ...counts };
+
+  const applyItem = (item: VaultItem, direction: 1 | -1) => {
+    if (item.is_deleted) {
+      next.trash += direction;
+      return;
+    }
+
+    next.all += direction;
+    if (item.category === 'login' || item.category === 'card' || item.category === 'note' || item.category === 'identity') {
+      next[item.category] += direction;
+    }
+    if (item.is_favourite) {
+      next.favourites += direction;
+    }
+  };
+
+  if (before) applyItem(before, -1);
+  if (after) applyItem(after, 1);
+
+  return {
+    all: Math.max(0, next.all),
+    login: Math.max(0, next.login),
+    card: Math.max(0, next.card),
+    note: Math.max(0, next.note),
+    identity: Math.max(0, next.identity),
+    favourites: Math.max(0, next.favourites),
+    trash: Math.max(0, next.trash),
+  };
 }
 
 // Vault unlock sub-hook
@@ -251,6 +330,54 @@ export default function Page() {
     [category, isFavouritesView, isTrashView],
   );
 
+  const applyOptimisticMutation = useCallback((
+    before: VaultItem | null,
+    after: VaultItem | null,
+    view = getCurrentView(),
+  ) => {
+    const activeSearch = search.trim().toLowerCase();
+    const previousVisibleMatch = before ? itemMatchesView(before, view) && itemMatchesSearch(before, activeSearch) : false;
+    const nextVisibleMatch = after ? itemMatchesView(after, view) && itemMatchesSearch(after, activeSearch) : false;
+    const totalDelta = (nextVisibleMatch ? 1 : 0) - (previousVisibleMatch ? 1 : 0);
+    const nextTotalItems = Math.max(0, (totalItems ?? 0) + totalDelta);
+    const nextTotalPages = computeTotalPages(nextTotalItems);
+
+    setSidebarCounts((current) => applySidebarDelta(current, before, after));
+    setTotalItems(nextTotalItems);
+    setTotalPages(nextTotalPages);
+    if (nextTotalPages === 0) {
+      setPage(1);
+    } else if (page > nextTotalPages) {
+      setPage(nextTotalPages);
+    }
+
+    if (activeSearch) {
+      setSearchResults((current) => (
+        current
+          ? reconcileVisibleItems(current, before, after, view, activeSearch, page)
+          : current
+      ));
+      invalidateCachedViews();
+      return;
+    }
+
+    const nextItems = reconcileVisibleItems(vaultItems, before, after, view, '', page);
+    setVaultItems(nextItems);
+    invalidateCachedViews(getViewCacheKey(view));
+    setCachedView(
+      getViewCacheKey(view),
+      nextItems,
+      nextTotalPages > 0 ? Math.min(page, nextTotalPages) : 1,
+      nextTotalPages,
+      nextTotalItems,
+    );
+  }, [getCurrentView, invalidateCachedViews, page, search, setCachedView, setVaultItems, totalItems, vaultItems]);
+
+  const getKnownItemById = useCallback((id: string) => {
+    if (selectedItem?.id === id) return selectedItem;
+    return (searchResults ?? vaultItems).find((item) => item.id === id) ?? null;
+  }, [searchResults, selectedItem, vaultItems]);
+
   // Idle auto-lock (extracted hook)
   const handleLockVault = useCallback(() => {
     lockVault();
@@ -295,6 +422,10 @@ export default function Page() {
       }
 
       if (event.type === 'user-updated') {
+        if (event.user) {
+          setUser(event.user);
+          return;
+        }
         void authApi.me()
           .then(({ data }) => setUser(data))
           .catch(() => {
@@ -514,19 +645,18 @@ export default function Page() {
       await toastService.withProgress(
         'Saving to vault...',
         async () => {
-          const { encrypted_data } = await buildEncryptedPayload(newItem);
+          const { encrypted_data, payload } = await buildEncryptedPayload(newItem);
           const favicon_url = newItem.url ? tryGetFaviconUrl(newItem.url) : undefined;
-          await vaultApi.create({ name: newItem.name, category: newItem.category, encrypted_data, favicon_url });
-          invalidateCachedViews();
+          const { data } = await vaultApi.create({ name: newItem.name, category: newItem.category, encrypted_data, favicon_url });
+          applyOptimisticMutation(null, { ...data, decrypted: payload });
           setShowAddModal(false);
           setNewItem({ ...emptyForm });
-          await refreshCurrentView(1);
         },
         'Item added to vault',
         { fallbackError: 'Failed to save item' },
       );
     } finally { setSavingItem(false); }
-  }, [cryptoKey, newItem, buildEncryptedPayload, invalidateCachedViews, refreshCurrentView]);
+  }, [applyOptimisticMutation, cryptoKey, newItem, buildEncryptedPayload]);
 
   const handleOpenEdit = useCallback((item: VaultItem) => {
     const d = item.decrypted ?? {};
@@ -552,6 +682,7 @@ export default function Page() {
       await toastService.withProgress(
         'Updating item...',
         async () => {
+          const previousItem = selectedItem;
           const { payload, encrypted_data } = await buildEncryptedPayload(editForm);
           const favicon_url = editForm.url
             ? (tryGetFaviconUrl(editForm.url) ?? selectedItem.favicon_url)
@@ -559,17 +690,20 @@ export default function Page() {
           const { data } = await vaultApi.update(selectedItem.id, { name: editForm.name, category: editForm.category, encrypted_data, favicon_url });
           const updated = { ...data, decrypted: payload };
           updateVaultItem(selectedItem.id, updated);
-          setSelectedItem(updated);
-          invalidateCachedViews();
+          if (itemMatchesView(updated, getCurrentView()) && itemMatchesSearch(updated, search.trim().toLowerCase())) {
+            setSelectedItem(updated);
+          } else {
+            setSelectedItem(null);
+          }
+          applyOptimisticMutation(previousItem, updated);
           setShowEditModal(false);
           setEditForm(null);
-          await refreshCurrentView(page);
         },
         'Item updated',
         { fallbackError: 'Failed to update item' },
       );
     } finally { setUpdatingItem(false); }
-  }, [buildEncryptedPayload, cryptoKey, editForm, invalidateCachedViews, page, refreshCurrentView, selectedItem, updateVaultItem]);
+  }, [applyOptimisticMutation, buildEncryptedPayload, cryptoKey, editForm, getCurrentView, search, selectedItem, updateVaultItem]);
 
   const handleDelete = useCallback(async (id: string, onAfterDelete?: () => void) => {
     if (deletingId) return;
@@ -578,39 +712,48 @@ export default function Page() {
       await toastService.withProgress(
         'Moving item to trash...',
         async () => {
+          const previousItem = getKnownItemById(id);
           await vaultApi.delete(id);
-          invalidateCachedViews();
+          if (previousItem) {
+            applyOptimisticMutation(previousItem, {
+              ...previousItem,
+              is_deleted: true,
+              deleted_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
+          } else {
+            await refreshCurrentView(page);
+          }
           if (selectedItem?.id === id) {
             setSelectedItem(null);
             onAfterDelete?.();
           }
-          await refreshCurrentView(page);
         },
         'Moved item to trash',
         { fallbackError: 'Failed to move item to trash' },
       );
     } finally { setDeletingId(null); }
-  }, [deletingId, invalidateCachedViews, page, refreshCurrentView, selectedItem]);
+  }, [applyOptimisticMutation, deletingId, getKnownItemById, page, refreshCurrentView, selectedItem]);
 
   const handleToggleFav = useCallback(async (item: VaultItem) => {
     const adding = !item.is_favourite;
     await toastService.withProgress(
       adding ? 'Adding to favourites...' : 'Removing from favourites...',
       async () => {
+        const previousItem = selectedItem?.id === item.id ? selectedItem : item;
         await vaultApi.update(item.id, { is_favourite: adding });
-        const updated = { ...item, is_favourite: adding };
+        const updated = { ...previousItem, is_favourite: adding, updated_at: new Date().toISOString() };
         updateVaultItem(item.id, updated);
-        if (selectedItem?.id === item.id) setSelectedItem(updated);
+        if (selectedItem?.id === item.id && (!isFavouritesView || adding)) setSelectedItem(updated);
         if (isFavouritesView && !adding && selectedItem?.id === item.id) {
           setSelectedItem(null);
         }
-        invalidateCachedViews();
-        await refreshCurrentView(page);
+        applyOptimisticMutation(previousItem, updated);
       },
       adding ? 'Added to favourites' : 'Removed from favourites',
       { fallbackError: 'Failed to update favourite' },
     );
-  }, [invalidateCachedViews, isFavouritesView, page, refreshCurrentView, selectedItem, updateVaultItem]);
+  }, [applyOptimisticMutation, isFavouritesView, selectedItem, updateVaultItem]);
 
   const copyToClipboard = useCallback(async (text: string, label: string) => {
     try {
@@ -648,6 +791,7 @@ export default function Page() {
         master_hint: profileForm.master_hint || null,
       });
       setUser(data);
+      emitAuthEvent('user-updated', data);
       toastService.success('Profile updated');
     } catch (err) {
       toastService.error(getSessionAwareError(err, 'Failed to update profile'));
@@ -699,6 +843,7 @@ export default function Page() {
         items,
       });
       setUser(updatedUser);
+      emitAuthEvent('user-updated', updatedUser);
       setMasterPasswordForm({ password: '', confirm: '', master_hint: updatedUser.master_hint ?? '' });
       lockVault();
       emitAuthEvent('lock');
@@ -739,17 +884,21 @@ export default function Page() {
     await toastService.withProgress(
       'Restoring item...',
       async () => {
-        await vaultApi.restore(id);
+        const previousItem = getKnownItemById(id);
+        const { data } = await vaultApi.restore(id);
         if (selectedItem?.id === id) {
           setSelectedItem(null);
         }
-        invalidateCachedViews();
-        await refreshCurrentView(page);
+        if (previousItem) {
+          applyOptimisticMutation(previousItem, data);
+        } else {
+          await refreshCurrentView(page);
+        }
       },
       'Restored item',
       { fallbackError: 'Failed to restore item' },
     );
-  }, [invalidateCachedViews, page, refreshCurrentView, selectedItem]);
+  }, [applyOptimisticMutation, getKnownItemById, page, refreshCurrentView, selectedItem]);
 
   const handleDeletePermanent = useCallback(async (id: string) => {
     if (deletingId) return;
@@ -758,10 +907,14 @@ export default function Page() {
       await toastService.withProgress(
         'Item deleting permanently...',
         async () => {
+          const previousItem = getKnownItemById(id);
           await vaultApi.deletePermanent(id);
           if (selectedItem?.id === id) setSelectedItem(null);
-          invalidateCachedViews();
-          await refreshCurrentView(page);
+          if (previousItem) {
+            applyOptimisticMutation(previousItem, null);
+          } else {
+            await refreshCurrentView(page);
+          }
         },
         'Item permanently deleted',
         { fallbackError: 'Failed to permanently delete item' },
@@ -769,7 +922,7 @@ export default function Page() {
     } finally {
       setDeletingId(null);
     }
-  }, [deletingId, invalidateCachedViews, page, refreshCurrentView, selectedItem]);
+  }, [applyOptimisticMutation, deletingId, getKnownItemById, page, refreshCurrentView, selectedItem]);
 
   const handlePageChange = useCallback(async (newPage: number) => {
     try {
