@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import { RotateCcw, Search, Plus, Shield, Globe, CreditCard, StickyNote, User, Trash2, Download, Star, Edit2, ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -320,7 +320,6 @@ interface ItemDetailPanelProps {
     copyToClipboard: (text: string, label: string) => MaybePromiseVoid;
     hibp: HibpState;
     setHibp: (v: HibpState) => void;
-    onDeleteSuccess?: () => void;
 }
 
 function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, handleToggleFav, handleOpenEdit, handleDelete, handleRestoreItem, handleDeletePermanent, deletingId, copyToClipboard, hibp, setHibp }: Readonly<ItemDetailPanelProps>) {
@@ -465,7 +464,13 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
         void onToggleTrash();
     }, [onToggleTrash]);
 
-    const detailPanelProps: Omit<ItemDetailPanelProps, 'isMobile' | 'handleDelete' | 'onDeleteSuccess'> = {
+    useEffect(() => {
+        if (mobilePanel === 'detail' && !selectedItem) {
+            setMobilePanel('list');
+        }
+    }, [mobilePanel, selectedItem]);
+
+    const detailPanelProps: Omit<ItemDetailPanelProps, 'isMobile' | 'handleDelete'> = {
         selectedItem, selectedItemLoading,
         handleToggleFav, handleOpenEdit, handleRestoreItem, handleDeletePermanent, deletingId, copyToClipboard, hibp, setHibp,
     };
@@ -548,7 +553,7 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                 flexDirection: 'column', background: 'var(--bg)', paddingTop: 57, overflowY: 'auto',
             }}>
                 <div style={{ padding: '24px 16px', flex: 1 }}>
-                    <ItemDetailPanel {...detailPanelProps} isMobile handleDelete={handleDelete} onDeleteSuccess={handleMobileBack} />
+                    <ItemDetailPanel {...detailPanelProps} isMobile handleDelete={handleDelete} />
                 </div>
             </div>
 
