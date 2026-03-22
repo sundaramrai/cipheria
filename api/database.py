@@ -86,8 +86,9 @@ class VaultItem(Base):
     )
 
     __table_args__ = (
-        Index("ix_vault_items_user_updated", "user_id", "updated_at"),
-        Index("ix_vault_items_user_deleted", "user_id", "is_deleted"),
+        Index("ix_vault_items_user_deleted_updated", "user_id", "is_deleted", "updated_at"),
+        Index("ix_vault_items_user_deleted_category_updated", "user_id", "is_deleted", "category", "updated_at"),
+        Index("ix_vault_items_user_deleted_favourite_updated", "user_id", "is_deleted", "is_favourite", "updated_at"),
     )
 
 
