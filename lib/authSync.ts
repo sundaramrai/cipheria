@@ -1,7 +1,10 @@
+import type { UserProfile } from '@/lib/types';
+
 export type AuthSyncEvent = {
   type: 'logout' | 'lock' | 'user-updated';
   id: string;
   tabId: string;
+  user?: UserProfile;
 };
 
 const AUTH_SYNC_CHANNEL = 'cipheria-auth';
@@ -21,7 +24,7 @@ function getTabId() {
   return tabId;
 }
 
-function createEvent(type: AuthSyncEvent['type']): AuthSyncEvent {
+function createEvent(type: AuthSyncEvent['type'], user?: UserProfile): AuthSyncEvent {
   return {
     type,
     id:
@@ -29,13 +32,14 @@ function createEvent(type: AuthSyncEvent['type']): AuthSyncEvent {
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     tabId: getTabId(),
+    ...(user ? { user } : {}),
   };
 }
 
-export function emitAuthEvent(type: AuthSyncEvent['type']) {
+export function emitAuthEvent(type: AuthSyncEvent['type'], user?: UserProfile) {
   if (globalThis.window === undefined) return;
 
-  const event = createEvent(type);
+  const event = createEvent(type, user);
   const payload = JSON.stringify(event);
 
   try {
