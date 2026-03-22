@@ -110,7 +110,7 @@ export const authApi = {
     api.post('/api/auth/verify-email/request'),
 
   verifyEmail: (token: string) =>
-    api.post('/api/auth/verify-email', { token }),
+    api.post<{ message: string; user: UserProfile }>('/api/auth/verify-email', { token }),
 
   unlock: (masterPasswordVerifier: string) =>
     api.post<PaginatedVaultItems<VaultItem>>('/api/auth/unlock', {
