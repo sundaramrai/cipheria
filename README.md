@@ -138,6 +138,8 @@ cd api
 uv run uvicorn index:app --reload --port 8000
 ```
 
+Redis is optional in local development. When `ENVIRONMENT=development`, the API disables Redis-backed cache and rate limiting. When `ENVIRONMENT=production`, Redis is enabled automatically if `REDIS_URL` is set.
+
 ### 5. Start the frontend
 
 ```bash
