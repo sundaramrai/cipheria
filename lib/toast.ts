@@ -28,8 +28,12 @@
  *   );
  */
 
+import { createElement } from 'react';
+import { Info } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { parseApiError } from '@/lib/errors';
+
+const infoToastIcon = createElement(Info, { size: 16, strokeWidth: 2.25 });
 
 export const toastService = {
     /** Persistent success toast. */
@@ -40,7 +44,7 @@ export const toastService = {
     info: (msg: string, toastId?: string) =>
         toast(msg, {
             ...(toastId ? { id: toastId } : {}),
-            icon: 'i',
+            icon: infoToastIcon,
         }),
 
     /** Persistent error toast. */
