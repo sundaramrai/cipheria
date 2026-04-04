@@ -14,10 +14,10 @@ Key families:
 import hashlib
 import json
 import logging
-import os
 from typing import Any, Optional
 
 import redis
+from settings import get_redis_url
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,9 @@ TTL_VAULT_ITEM = 10 * 60
 
 
 def _build_redis_client() -> Optional[redis.Redis]:
-    url = os.getenv("REDIS_URL")
+    url = get_redis_url()
     if not url:
-        logger.warning("REDIS_URL not set; caching disabled.")
+        logger.info("Redis disabled for this environment; caching disabled.")
         return None
     try:
         client = redis.from_url(
