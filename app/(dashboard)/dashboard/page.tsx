@@ -135,6 +135,13 @@ function computeTotalPages(totalItems: number): number {
   return totalItems === 0 ? 0 : Math.ceil(totalItems / PAGE_SIZE);
 }
 
+function getViewTotalCount(view: ViewRequest, counts: SidebarCounts): number {
+  if (view.deletedOnly) return counts.trash;
+  if (view.favouritesOnly) return counts.favourites;
+  if (view.category === 'all') return counts.all;
+  return counts[view.category];
+}
+
 function applySidebarDelta(counts: SidebarCounts, before: VaultItem | null, after: VaultItem | null): SidebarCounts {
   const next = { ...counts };
 
@@ -284,6 +291,9 @@ export default function Page() {
   const decryptingItemIds = useRef(new Set<string>());
   const currentSelectionRef = useRef<string | null>(null);
   const viewCacheRef = useRef<Record<string, CachedViewState>>({});
+  const shouldRestoreActiveViewRef = useRef(false);
+  const listRequestIdRef = useRef(0);
+  const inFlightViewLoadsRef = useRef<Record<string, Promise<CachedViewState & { sidebarCounts?: SidebarCounts | null }>>>({});
   const setCachedView = useCallback((key: string, items: VaultItem[], currentPage: number, nextTotalPages: number, nextTotalItems: number) => {
     viewCacheRef.current[key] = {
       items,
@@ -311,6 +321,59 @@ export default function Page() {
     setSelectedItem(null);
     return true;
   }, [setVaultItems]);
+  const applyResolvedView = useCallback((view: ViewRequest, nextState: CachedViewState) => {
+    setVaultItems(nextState.items);
+    setPage(nextState.page);
+    setTotalPages(nextState.totalPages);
+    setTotalItems(nextState.totalItems);
+    setCachedView(
+      getViewCacheKey(view),
+      nextState.items,
+      nextState.page,
+      nextState.totalPages,
+      nextState.totalItems,
+    );
+    decryptingItemIds.current.clear();
+    setSelectedItem(null);
+  }, [setCachedView, setVaultItems]);
+  const getCompleteAllViewItems = useCallback(() => {
+    const cachedAllView = viewCacheRef.current.all;
+    if (!cachedAllView) return null;
+    if (cachedAllView.page !== 1) return null;
+    if (cachedAllView.totalItems !== sidebarCounts.all) return null;
+    if (cachedAllView.items.length !== cachedAllView.totalItems) return null;
+    return cachedAllView.items;
+  }, [sidebarCounts.all]);
+  const hydrateViewFromLocalData = useCallback((view: ViewRequest) => {
+    const totalCount = getViewTotalCount(view, sidebarCounts);
+    if (totalCount === 0) {
+      applyResolvedView(view, {
+        items: [],
+        page: 1,
+        totalPages: 0,
+        totalItems: 0,
+      });
+      return true;
+    }
+    if (view.deletedOnly) return false;
+
+    const allItems = getCompleteAllViewItems();
+    if (!allItems) return false;
+
+    const matchingItems = sortByUpdatedDesc(allItems.filter((item) => itemMatchesView(item, view)));
+    applyResolvedView(view, {
+      items: matchingItems.slice(0, PAGE_SIZE),
+      page: 1,
+      totalPages: computeTotalPages(matchingItems.length),
+      totalItems: matchingItems.length,
+    });
+    return true;
+  }, [applyResolvedView, getCompleteAllViewItems, sidebarCounts]);
+  const restoreOrHydrateView = useCallback((view: ViewRequest) => {
+    const cacheKey = getViewCacheKey(view);
+    if (restoreCachedView(cacheKey)) return true;
+    return hydrateViewFromLocalData(view);
+  }, [hydrateViewFromLocalData, restoreCachedView]);
   const { masterPassword, setMasterPassword, unlocking, unlockVault } =
     useVaultUnlock(
       user,
@@ -437,10 +500,14 @@ export default function Page() {
 
   useEffect(() => {
     if (isVaultLocked) {
+      shouldRestoreActiveViewRef.current = true;
+      listRequestIdRef.current += 1;
+      inFlightViewLoadsRef.current = {};
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
       searchAbortRef.current?.abort();
       setSearch('');
       setSearchResults(null);
+      setListLoading(false);
       setSidebarCounts(EMPTY_SIDEBAR_COUNTS);
       viewCacheRef.current = {};
       decryptingItemIds.current.clear();
@@ -463,12 +530,15 @@ export default function Page() {
     };
   }, []);
 
-  const loadVaultPage = useCallback(async (
-    newPage: number,
-    view: ViewRequest = buildViewRequest(category, isFavouritesView, isTrashView),
-  ) => {
-    setListLoading(true);
-    try {
+  const fetchVaultPage = useCallback(async (
+    requestedPage: number,
+    view: ViewRequest,
+  ): Promise<CachedViewState & { sidebarCounts?: SidebarCounts | null }> => {
+    const requestKey = `${getViewCacheKey(view)}:${requestedPage}`;
+    const existingRequest = inFlightViewLoadsRef.current[requestKey];
+    if (existingRequest !== undefined) return await existingRequest;
+
+    const requestPromise = (async () => {
       const params: {
         category?: Exclude<Category, 'all'>;
         deleted_only: boolean;
@@ -476,8 +546,8 @@ export default function Page() {
         page: number;
         page_size: number;
       } = {
-        page: newPage,
-        page_size: 50,
+        page: requestedPage,
+        page_size: PAGE_SIZE,
         deleted_only: view.deletedOnly,
         favourites_only: view.deletedOnly ? false : view.favouritesOnly,
       };
@@ -486,33 +556,68 @@ export default function Page() {
       }
 
       const { data } = await vaultApi.list(params);
-      if (data.total_pages > 0 && newPage > data.total_pages) {
-        await loadVaultPage(data.total_pages, view);
-        return;
+      if (data.total_pages > 0 && requestedPage > data.total_pages) {
+        return fetchVaultPage(data.total_pages, view);
       }
 
       const { vaultItems: storeItems } = useAuthStore.getState();
-      const hydratedItems = data.items.map((item: VaultItem) => rehydrateListItem(item, storeItems));
-      setVaultItems(hydratedItems);
-      setPage(data.total_pages > 0 ? newPage : 1);
-      setTotalPages(data.total_pages ?? 1);
-      setTotalItems(data.total ?? 0);
-      if (data.sidebar_counts) {
-        setSidebarCounts(data.sidebar_counts);
-      }
-      setCachedView(
-        getViewCacheKey(view),
-        hydratedItems,
-        data.total_pages > 0 ? newPage : 1,
-        data.total_pages ?? 1,
-        data.total ?? 0,
-      );
-      decryptingItemIds.current.clear();
-      setSelectedItem(null);
+      return {
+        items: data.items.map((item: VaultItem) => rehydrateListItem(item, storeItems)),
+        page: data.total_pages > 0 ? requestedPage : 1,
+        totalPages: data.total_pages ?? 0,
+        totalItems: data.total ?? 0,
+        sidebarCounts: data.sidebar_counts,
+      };
+    })();
+
+    inFlightViewLoadsRef.current[requestKey] = requestPromise;
+    try {
+      return await requestPromise;
     } finally {
-      setListLoading(false);
+      delete inFlightViewLoadsRef.current[requestKey];
     }
-  }, [category, isFavouritesView, isTrashView, setCachedView, setVaultItems]);
+  }, []);
+
+  const loadVaultPage = useCallback(async (
+    newPage: number,
+    view: ViewRequest = buildViewRequest(category, isFavouritesView, isTrashView),
+  ) => {
+    const requestId = ++listRequestIdRef.current;
+    setListLoading(true);
+    try {
+      const nextState = await fetchVaultPage(newPage, view);
+      if (requestId !== listRequestIdRef.current) return;
+      if (nextState.sidebarCounts) {
+        setSidebarCounts(nextState.sidebarCounts);
+      }
+      applyResolvedView(view, nextState);
+    } finally {
+      if (requestId === listRequestIdRef.current) {
+        setListLoading(false);
+      }
+    }
+  }, [applyResolvedView, category, fetchVaultPage, isFavouritesView, isTrashView]);
+
+  useEffect(() => {
+    if (isVaultLocked || !shouldRestoreActiveViewRef.current) {
+      return;
+    }
+
+    shouldRestoreActiveViewRef.current = false;
+    const view = getCurrentView();
+    if (!view.deletedOnly && !view.favouritesOnly && view.category === 'all') {
+      return;
+    }
+
+    if (restoreOrHydrateView(view)) {
+      return;
+    }
+
+    void loadVaultPage(1, view).catch((err) => {
+      toastService.error(getSessionAwareError(err, 'Vault is temporarily unavailable'));
+      console.error('[unlock-view-restore] Failed to restore active view', err);
+    });
+  }, [getCurrentView, isVaultLocked, loadVaultPage, restoreOrHydrateView]);
 
   const runSearch = useCallback(async (
     term: string,
@@ -619,8 +724,7 @@ export default function Page() {
       setSearchResults(null);
       setSearchLoading(false);
       const view = getCurrentView();
-      const cacheKey = getViewCacheKey(view);
-      if (!restoreCachedView(cacheKey)) {
+      if (!restoreOrHydrateView(view)) {
         void loadVaultPage(1, view);
       }
       return;
@@ -631,7 +735,7 @@ export default function Page() {
       searchAbortRef.current = controller;
       await runSearch(val, controller.signal);
     }, 300);
-  }, [getCurrentView, loadVaultPage, restoreCachedView, runSearch, totalItems]);
+  }, [getCurrentView, loadVaultPage, restoreOrHydrateView, runSearch, totalItems]);
 
   const handleAddItem = useCallback(async (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -933,6 +1037,9 @@ export default function Page() {
   }, [loadVaultPage]);
 
   const handleCategoryChange = useCallback(async (nextCategory: Category) => {
+    const previousCategory = category;
+    const previousIsFavouritesView = isFavouritesView;
+    const previousIsTrashView = isTrashView;
     const nextView = buildViewRequest(nextCategory, false, false);
     setCategory(nextCategory);
     setIsFavouritesView(false);
@@ -943,11 +1050,17 @@ export default function Page() {
     try {
       await loadVaultPage(1, nextView);
     } catch (err) {
+      setCategory(previousCategory);
+      setIsFavouritesView(previousIsFavouritesView);
+      setIsTrashView(previousIsTrashView);
+      toastService.error(getSessionAwareError(err, 'Vault is temporarily unavailable'));
       console.error('[category] Failed to switch view', err);
     }
-  }, [loadVaultPage, restoreCachedView]);
+  }, [category, isFavouritesView, isTrashView, loadVaultPage, restoreCachedView]);
 
   const handleToggleFavourites = useCallback(async () => {
+    const previousIsFavouritesView = isFavouritesView;
+    const previousIsTrashView = isTrashView;
     const next = !isFavouritesView;
     const nextView = buildViewRequest(category, next, false);
     setIsFavouritesView(next);
@@ -958,24 +1071,32 @@ export default function Page() {
     try {
       await loadVaultPage(1, nextView);
     } catch (err) {
+      setIsFavouritesView(previousIsFavouritesView);
+      setIsTrashView(previousIsTrashView);
+      toastService.error(getSessionAwareError(err, 'Vault is temporarily unavailable'));
       console.error('[favourites] Failed to switch view', err);
     }
-  }, [category, isFavouritesView, loadVaultPage, restoreCachedView]);
+  }, [category, isFavouritesView, isTrashView, loadVaultPage, restoreCachedView]);
 
   const handleToggleTrash = useCallback(async () => {
+    const previousIsTrashView = isTrashView;
+    const previousIsFavouritesView = isFavouritesView;
     const next = !isTrashView;
     const nextView = buildViewRequest(category, false, next);
     setIsTrashView(next);
     setIsFavouritesView(false);
     setSearch('');
     setSearchResults(null);
-    if (restoreCachedView(getViewCacheKey(nextView))) return;
+    if (!next && restoreCachedView(getViewCacheKey(nextView))) return;
     try {
       await loadVaultPage(1, nextView);
     } catch (err) {
+      setIsTrashView(previousIsTrashView);
+      setIsFavouritesView(previousIsFavouritesView);
+      toastService.error(getSessionAwareError(err, 'Vault is temporarily unavailable'));
       console.error('[trash] Failed to switch view', err);
     }
-  }, [category, isTrashView, loadVaultPage, restoreCachedView]);
+  }, [category, isFavouritesView, isTrashView, loadVaultPage, restoreCachedView]);
 
   const handleOpenSettings = useCallback(() => setShowSettingsModal(true), []);
   const handleCloseSettings = useCallback(() => setShowSettingsModal(false), []);
