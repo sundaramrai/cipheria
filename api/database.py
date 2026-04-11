@@ -3,6 +3,7 @@ from typing import Generator
 import logging
 import os
 import re
+from urllib.parse import parse_qs, urlsplit
 import uuid
 
 from dotenv import load_dotenv
@@ -15,32 +16,33 @@ from sqlalchemy.types import TIMESTAMP
 logger = logging.getLogger(__name__)
 load_dotenv()
 
+DEFAULT_DATABASE_CONNECT_TIMEOUT = 5
+
 
 def _build_database_url() -> str:
     url = os.getenv("DATABASE_URL", "")
     return re.sub(r"^postgres(ql)?://", "postgresql+psycopg://", url)
 
 
-def _database_connect_timeout() -> int:
-    raw = os.getenv("DATABASE_CONNECT_TIMEOUT", "5")
-    try:
-        return max(1, int(raw))
-    except ValueError:
-        logger.warning(
-            "Invalid DATABASE_CONNECT_TIMEOUT=%r; falling back to 5 seconds.",
-            raw,
-        )
-        return 5
-
+def _database_connect_args(database_url: str) -> dict[str, int]:
+    query_params = parse_qs(urlsplit(database_url).query)
+    if "connect_timeout" in query_params:
+        return {}
+    logger.debug(
+        "DATABASE_URL missing connect_timeout; using default of %s seconds.",
+        DEFAULT_DATABASE_CONNECT_TIMEOUT,
+    )
+    return {"connect_timeout": DEFAULT_DATABASE_CONNECT_TIMEOUT}
 
 # NullPool is intentional for Vercel serverless - each request gets a fresh
 # connection rather than sharing a pool across short-lived function instances.
 # If you migrate to a persistent server, swap to QueuePool with pool_size=5.
+database_url = _build_database_url()
 engine = create_engine(
-    _build_database_url(),
+    database_url,
     poolclass=NullPool,
     echo=False,
-    connect_args={"connect_timeout": _database_connect_timeout()},
+    connect_args=_database_connect_args(database_url),
 )
 
 SessionLocal = sessionmaker(
