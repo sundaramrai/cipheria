@@ -1,19 +1,17 @@
-import os
 from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from settings import get_redis_url
+from settings import get_redis_url, is_production
 
 _redis_url = get_redis_url()
-TRUST_PROXY_HEADERS = (
-    os.getenv("TRUST_PROXY_HEADERS", "true" if os.getenv("VERCEL") else "false")
-    .lower()
-    == "true"
-)
+
+
+def _should_trust_proxy_headers() -> bool:
+    return is_production()
 
 
 def get_client_ip(request: Request) -> str:
-    if TRUST_PROXY_HEADERS:
+    if _should_trust_proxy_headers():
         forwarded_for = request.headers.get("x-forwarded-for")
         if forwarded_for:
             return forwarded_for.split(",")[0].strip()
