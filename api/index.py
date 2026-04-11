@@ -4,12 +4,14 @@ import logging
 
 sys.path.insert(0, os.path.dirname(__file__))
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy.exc import InterfaceError, OperationalError
 from limiter import limiter
 from routes.auth import router as auth_router
 from routes.vault import router as vault_router
@@ -79,6 +81,24 @@ app.add_middleware(
 # external routing can add /api without double-prefixing.
 app.include_router(auth_router)
 app.include_router(vault_router)
+
+
+@app.exception_handler(OperationalError)
+@app.exception_handler(InterfaceError)
+async def database_exception_handler(
+    request: Request,
+    exc: OperationalError | InterfaceError,
+):
+    logger.error(
+        "Database unavailable during %s %s: %s",
+        request.method,
+        request.url.path,
+        exc,
+    )
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database temporarily unavailable. Please try again."},
+    )
 
 
 @app.get("/health")
