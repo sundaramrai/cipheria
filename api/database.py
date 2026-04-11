@@ -1,15 +1,16 @@
-﻿from sqlalchemy import ( create_engine, Column, String, Text, Boolean, Integer, Index, text )
-from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
-from sqlalchemy.types import TIMESTAMP
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.pool import NullPool
 from datetime import datetime, timezone
 from typing import Generator
 import logging
-import uuid
 import os
 import re
+import uuid
+
 from dotenv import load_dotenv
+from sqlalchemy import Boolean, Column, Index, Integer, String, Text, create_engine
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.pool import NullPool
+from sqlalchemy.types import TIMESTAMP
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -20,13 +21,26 @@ def _build_database_url() -> str:
     return re.sub(r"^postgres(ql)?://", "postgresql+psycopg://", url)
 
 
-# NullPool is intentional for Vercel serverless — each request gets a fresh
+def _database_connect_timeout() -> int:
+    raw = os.getenv("DATABASE_CONNECT_TIMEOUT", "5")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        logger.warning(
+            "Invalid DATABASE_CONNECT_TIMEOUT=%r; falling back to 5 seconds.",
+            raw,
+        )
+        return 5
+
+
+# NullPool is intentional for Vercel serverless - each request gets a fresh
 # connection rather than sharing a pool across short-lived function instances.
 # If you migrate to a persistent server, swap to QueuePool with pool_size=5.
 engine = create_engine(
     _build_database_url(),
     poolclass=NullPool,
     echo=False,
+    connect_args={"connect_timeout": _database_connect_timeout()},
 )
 
 SessionLocal = sessionmaker(
@@ -55,7 +69,7 @@ class User(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
-    # Password hint — never the actual password
+    # Password hint - never the actual password
     master_hint = Column(String(255), nullable=True)
     # Salt for client-side PBKDF2 key derivation
     vault_salt = Column(
@@ -138,24 +152,3 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-
-
-def create_tables():
-    Base.metadata.create_all(bind=engine)
-    # pg_trgm enables fast ILIKE search via GIN index
-    # In production on Neon, run manually:
-    #   CREATE EXTENSION IF NOT EXISTS pg_trgm;
-    #   CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_vault_items_name_trgm
-    #     ON vault_items USING gin (name gin_trgm_ops);
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-            conn.execute(
-                text(
-                    "CREATE INDEX IF NOT EXISTS ix_vault_items_name_trgm "
-                    "ON vault_items USING gin (name gin_trgm_ops)"
-                )
-            )
-            conn.commit()
-    except Exception as e:
-        logger.warning(f"Could not create pg_trgm index: {e}")
