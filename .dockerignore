@@ -1,0 +1,15 @@
+.git
+.next
+node_modules
+.pnpm-store
+.env
+.env.local
+api/.env
+api/.venv
+api/.ruff_cache
+api/__pycache__
+__pycache__
+.uv-cache
+.ruff_cache
+.vscode
+tsconfig.tsbuildinfo
