@@ -135,7 +135,7 @@ export default function Page() {
           <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Cipheria</span>
         </div>
         <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>·</span>
-        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>© 2026 · Open source · No ads · No tracking</span>
+        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>© {new Intl.DateTimeFormat('en-US', { year: 'numeric' }).format(new Date())} · Open source · No ads · No tracking</span>
       </footer>
     </main>
   );
