@@ -6,7 +6,10 @@ const shouldProxyApi = Boolean(apiOrigin);
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
+  // Vercel's Next.js adapter packages the deployment itself. Enabling
+  // standalone output there makes Next 16.3 look for a trace file that the
+  // adapter intentionally does not emit. Docker builds still need it.
+  ...(process.env.VERCEL ? {} : { output: 'standalone' }),
 
   // Reduce production bundle size - skip inline source maps
   productionBrowserSourceMaps: false,
