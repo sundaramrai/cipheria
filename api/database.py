@@ -3,6 +3,7 @@ from typing import Generator
 import logging
 import os
 import re
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 import uuid
 
@@ -14,7 +15,8 @@ from sqlalchemy.pool import NullPool
 from sqlalchemy.types import TIMESTAMP
 
 logger = logging.getLogger(__name__)
-load_dotenv()
+_ENV_DIR = Path(__file__).resolve().parent
+load_dotenv(_ENV_DIR / ".env")
 
 DEFAULT_DATABASE_CONNECT_TIMEOUT = 5
 
