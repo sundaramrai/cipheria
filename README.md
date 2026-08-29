@@ -1,95 +1,42 @@
-<!-- markdownlint-disable MD033 MD041 -->
-<div align="center">
-
 # Cipheria
 
-## Zero-Knowledge Password Manager
+Cipheria is a password manager with browser-side vault encryption. The API stores encrypted vault payloads and the metadata required to list them.
 
-*Your master password never leaves your device.*
+## Security boundary
 
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](LICENSE)
-[![Live Demo](https://img.shields.io/badge/Live-cipheria.vercel.app-brightgreen)](https://cipheria.vercel.app)
-
-</div>
-<!-- markdownlint-enable MD033 MD041 -->
-
-Cipheria is a zero-knowledge password manager built with Next.js and FastAPI. Encryption and decryption happen in the browser, and the server stores only ciphertext plus metadata.
-
-## Stack
-
-- Frontend: Next.js 16, React 19, TypeScript
-- Backend: FastAPI, SQLAlchemy, Redis cache, SlowAPI rate limiting
-- Database: PostgreSQL
-- Deploy: Vercel
-
-## Security Model
-
-- Master password never leaves the client
-- Vault data is encrypted client-side with AES-256-GCM
-- Key derivation uses PBKDF2-SHA256 with 600k iterations
-- Auth verifier is stored with bcrypt
-- Access tokens are short-lived JWTs: 15 minutes
-- Refresh tokens are rotated and stored hashed
-
-## Main Features
-
-- Client-side encrypted vault
-- Login, card, note, and identity vault items
-- Search, favourites, trash, restore, and permanent delete
-- Email verification flow
-- Encrypted JSON vault export
-- Automatic access-token refresh
-- Optional Redis-backed caching and rate limiting
-
-## Project Structure
-
-```text
-cipheria/
-|-- app/                        # Next.js App Router pages
-|-- components/                 # Frontend UI and hooks
-|-- lib/                        # Frontend store, API client, crypto helpers
-|-- public/                     # Static assets
-|-- styles/                     # Global styles
-|-- api/                        # FastAPI backend at /api/*
-|   |-- index.py                # App entry point
-|   |-- database.py             # SQLAlchemy models and DB session
-|   |-- crypto.py               # JWT and password helpers
-|   |-- deps.py                 # Auth dependencies
-|   |-- routes/
-|   |   |-- auth.py             # /api/auth/*
-|   |   `-- vault.py            # /api/vault/*
-|   |-- pyproject.toml          # Python dependencies
-|   `-- uv.lock                 # Locked Python dependency graph
-|-- alembic/                    # Database migrations
-|-- package.json                # Root Next.js app
-|-- next.config.js              # Next config; optional local API proxy
-`-- alembic.ini
-```
+- The browser derives a vault key from the master password with PBKDF2-SHA-256 (600,000 iterations) and encrypts vault payloads with AES-256-GCM.
+- The master password is not sent to the API. The API stores a bcrypt-hashed verifier, encrypted payloads, and unencrypted item metadata such as name, category, favourite state, and timestamps.
+- Access tokens last 15 minutes. Refresh tokens last 30 days, are rotated, and are stored hashed.
+- Losing the master password means encrypted vault data cannot be recovered.
 
 ## Requirements
 
-- Node.js 18+
-- Python 3.14
-- [uv](https://docs.astral.sh/uv/)
-- PostgreSQL database
+- Node.js 22 and pnpm 10 (the versions used by the Docker image and lockfile)
+- Python 3.14 and [uv](https://docs.astral.sh/uv/)
+- Docker Desktop for the recommended local PostgreSQL and Redis services
 
-## Environment Variables
+## Run locally
 
-### Backend: `api/.env`
+This is the recommended development mode: PostgreSQL and Redis run in Docker; FastAPI and Next.js run on the host with hot reload.
 
-Required:
+### 1. Configure the API
+
+Create `api/.env`. Never commit it.
 
 ```env
-DATABASE_URL=postgresql://user:pass@host/db
-JWT_SECRET=your-long-random-secret
+ENVIRONMENT=development
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5434/cipheria
+REDIS_ENABLED=true
+REDIS_URL=redis://127.0.0.1:6379/0
+JWT_SECRET=replace-with-a-long-random-secret
 ALLOWED_ORIGINS=http://localhost:3000
 ```
 
-Optional:
+`127.0.0.1` is intentional. The Compose services bind to IPv4 loopback; using `localhost` can cause a slow IPv6 fallback on Windows.
+
+SMTP is optional. Add these only when testing email verification:
 
 ```env
-REDIS_URL=redis://localhost:6379/0
-
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USERNAME=your-user
@@ -98,59 +45,43 @@ SMTP_FROM=no-reply@example.com
 SMTP_STARTTLS=true
 ```
 
-### Frontend: `.env.local`
-
-Only needed for local development when the Next app runs on `3000` and the API runs separately on `8000`. The Next dev server rewrites `/api/*` to this origin.
+Create `.env.local` at the repository root so the Next.js development server proxies browser requests to FastAPI:
 
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 ```
 
-In production on Vercel, the frontend and backend are same-origin, so `NEXT_PUBLIC_API_URL` is not needed.
+### 2. Start local infrastructure
 
-### Docker runtime note
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db redis
+```
 
-The Docker UI container does not use `.env.local` directly. Inside Docker, the Next.js container reaches the API over the internal Compose network at `http://api:8000`, so Docker passes `INTERNAL_API_ORIGIN` instead.
+PostgreSQL is exposed only at `127.0.0.1:5434`; Redis is exposed only at `127.0.0.1:6379`. Both are separate from any managed database. A fresh local PostgreSQL volume has no users or vault items.
 
-For local Docker, the backend container reuses `api/.env` for shared secrets such as `JWT_SECRET` and SMTP settings, then overrides infrastructure addresses like `DATABASE_URL` and `REDIS_URL` to point at the local `db` and `redis` containers.
-
-For production Docker, inject environment variables from your container platform's secret manager rather than mounting `api/.env`.
-
-Local Docker also sets `SUPPRESS_HEALTHCHECK_ACCESS_LOGS=true` so Compose health probes do not spam API access logs. Other environments keep normal `/health` request logging unless you opt in.
-
-## Local Development
-
-### 1. Install frontend dependencies
+### 3. Install dependencies and migrate
 
 ```bash
 pnpm install
-```
-
-### 2. Install backend dependencies
-
-```bash
 cd api
 uv sync --group dev
-cd ..
-```
-
-### 3. Run database migrations
-
-```bash
-cd api
 uv run alembic -c ../alembic.ini upgrade head
 ```
 
-### 4. Start the backend
+### 4. Run the API
+
+Keep this terminal open:
 
 ```bash
 cd api
 uv run uvicorn index:app --reload --port 8000
 ```
 
-Redis is optional in local development. When `ENVIRONMENT=development`, the API disables Redis-backed cache and rate limiting. When `ENVIRONMENT=production`, Redis is enabled automatically if `REDIS_URL` is set.
+Verify it with `http://127.0.0.1:8000/health`.
 
-### 5. Start the frontend
+### 5. Run the frontend
+
+In a second terminal, from the repository root:
 
 ```bash
 pnpm dev
@@ -158,223 +89,67 @@ pnpm dev
 
 Open `http://localhost:3000`.
 
-## Docker
+On Windows systems where PowerShell blocks `pnpm.ps1`, use `pnpm.cmd` in place of `pnpm`.
 
-This repo keeps Docker as a parallel runtime path without changing the Vercel deployment model:
+## Full Docker development stack
 
-- [`Dockerfile`](/c:/Sundaram%27s%20Workspace/Cipheria/Dockerfile) builds the Next.js UI image
-- [`api/Dockerfile`](/c:/Sundaram%27s%20Workspace/Cipheria/api/Dockerfile) builds the FastAPI API image
-- [`docker-compose.yml`](/c:/Sundaram%27s%20Workspace/Cipheria/docker-compose.yml) is the shared base config
-- [`docker-compose.dev.yml`](/c:/Sundaram%27s%20Workspace/Cipheria/docker-compose.dev.yml) adds local-only services and overrides
-
-### Local Docker
-
-Local Docker runs the full stack: UI, API, PostgreSQL, and Redis.
-
-It keeps the existing env split:
-
-- `.env.local` remains for host-based Next.js development outside Docker
-- `api/.env` is reused by the API container for local Docker secrets such as `JWT_SECRET` and SMTP settings
-
-The dev overlay is optimized for fast inner-loop work:
-
-- the Dockerfiles expose lightweight `dev` targets, so local Docker does not build the full production runtime image
-- the UI runs `next dev` with a bind mount and hot reload
-- the API runs `uvicorn --reload` with bind mounts for `api/` and `alembic/`
-- `node_modules`, `.next`, the Python virtualenv, and dependency caches live in named volumes
-- dependencies reinstall only when the relevant lockfile changes
-- Redis is kept internal to the Docker network, and Postgres is exposed only on `127.0.0.1` for optional local DB access
-
-Start the local Docker stack:
+To run the UI and API in containers too:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-After the first boot, normal code edits do not require rebuilds. The running dev servers reload automatically.
-
-Start the stack in the background:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-```
-
-Stop the local Docker stack:
+Do not run this at the same time as the host-based API/UI workflow: both use ports 3000 and 8000. Stop the stack with:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 ```
 
-Remove the Postgres volume too:
+To also erase the local PostgreSQL data volume:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
 ```
 
-Recreate the running dev services after compose or env changes:
+## Configuration and deployment
+
+`api/.env` is only for local development. In a deployment, provide environment variables through the platform's secret manager:
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `JWT_SECRET` | Yes | JWT signing secret |
+| `ALLOWED_ORIGINS` | Yes | Comma-separated browser origins allowed by CORS |
+| `ENVIRONMENT=production` | Yes | Enables production behavior and hides API docs |
+| `REDIS_URL` | Recommended | Cache and shared rate-limit storage |
+| `SMTP_*` | Optional | Email verification delivery |
+
+The repository's `vercel.json` defines a Vercel Services deployment: Next.js serves `/` and FastAPI serves `/api/*`. Do not set `NEXT_PUBLIC_API_URL` there; the browser should use the same origin. Vercel project settings must use the repository root and the `Services` framework preset.
+
+The `Dockerfile` and `api/Dockerfile` build separate production UI and API images. They are not the local Compose runtime. Inject deployment configuration at runtime; do not copy `api/.env` into an image.
+
+## Development checks
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d api ui
-```
-
-Check service status:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
-```
-
-Stream UI and API logs:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f ui api
-```
-
-Rebuild only the service whose image inputs changed:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build api
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build ui
-```
-
-### Production Docker Images
-
-The same two Dockerfiles can be used for production, but production should run `ui` and `api` as separate services on your container platform rather than shipping the local Compose stack.
-
-The production UI image uses Next.js standalone output, so the runtime image ships only the generated server bundle, static assets, and public files rather than the full application `node_modules` tree.
-
-Build the UI image:
-
-```bash
-docker build -t your-registry/cipheria-ui:TAG --build-arg INTERNAL_API_ORIGIN=https://api.example.com .
-```
-
-Build the API image:
-
-```bash
-docker build -t your-registry/cipheria-api:TAG -f api/Dockerfile .
-```
-
-Push both images:
-
-```bash
-docker push your-registry/cipheria-ui:TAG
-docker push your-registry/cipheria-api:TAG
-```
-
-For production:
-
-- inject secrets from the platform rather than using `api/.env`
-- point `DATABASE_URL` and `REDIS_URL` at managed services
-- set `ALLOWED_ORIGINS` to your production frontend origin
-- run Alembic migrations as a one-off release task before or during deploy
-
-Example migration command for the API image:
-
-```bash
-docker run --rm -e DATABASE_URL=postgresql://user:pass@host/db your-registry/cipheria-api:TAG sh -c "uv run alembic -c ../alembic.ini upgrade head"
-```
-
-If your production platform routes `/api/*` to the API service at the edge or proxy layer, you can omit `INTERNAL_API_ORIGIN` and keep the frontend same-origin.
-
-## Vercel Deployment
-
-This repo is deployed as a single Vercel project from the repository root.
-
-The repository uses [vercel.json](/c:/Sundaram%27s%20Workspace/Cipheria/vercel.json) with `experimentalServices` so Vercel can serve:
-
-- the Next.js app from `/`
-- the FastAPI backend from `/api/*`
-
-Dashboard requirements:
-
-- set the project Framework Preset to `Services`
-- make sure your Vercel account/project has access to Services
-- keep the project Root Directory as the repository root
-
-Set these environment variables in Vercel:
-
-- `DATABASE_URL`
-- `JWT_SECRET`
-- `ALLOWED_ORIGINS` set to your production origin
-- `REDIS_URL` if Redis is enabled
-- SMTP variables if email sending is enabled
-
-Do not set `NEXT_PUBLIC_API_URL` in production. The Services config keeps frontend and backend on the same origin, and the local dev rewrite is disabled in production.
-
-## API Overview
-
-### Auth
-
-Base path: `/api/auth`
-
-- `POST /register`
-- `POST /login/challenge`
-- `POST /login`
-- `POST /refresh`
-- `POST /logout`
-- `POST /verify-email`
-- `POST /verify-email/request`
-- `POST /unlock`
-- `PATCH /profile`
-- `PATCH /master-password`
-- `DELETE /account`
-- `GET /me`
-
-`/forgot-password` and `/reset-password` exist but intentionally return an error because master-password reset is not supported in zero-knowledge mode.
-
-### Vault
-
-Base path: `/api/vault`
-
-- `GET /export/json`
-- `GET /`
-- `GET /{item_id}`
-- `POST /`
-- `PATCH /{item_id}`
-- `DELETE /{item_id}`
-- `POST /{item_id}/restore`
-- `DELETE /{item_id}/permanent`
-
-List endpoint supports:
-
-- `category=login|card|note|identity`
-- `search=...`
-- `favourites_only=true`
-- `deleted_only=true`
-- `page`
-- `page_size`
-
-### Health
-
-- `GET /api/health`
-
-### Docs
-
-Interactive docs are available only outside production. In local backend development they are served directly from FastAPI:
-
-- `http://localhost:8000/docs`
-- `http://localhost:8000/redoc`
-
-## Useful Commands
-
-### Frontend
-
-```bash
-pnpm dev
 pnpm lint
 pnpm typecheck
+pnpm build
+
+cd api
+uv run ruff check .
 ```
 
-### Backend
+## Repository layout
 
-```bash
-cd api
-uv sync --group dev
-uv run ruff check .
-uv run alembic -c ../alembic.ini upgrade head
-uv run uvicorn index:app --reload --port 8000
+```text
+app/                 Next.js App Router pages
+components/          Dashboard and auth UI
+lib/                 Browser crypto and API client
+api/                 FastAPI application
+alembic/             PostgreSQL migrations
+docker-compose*.yml  Local Docker infrastructure and development stack
 ```
 
 ## License
 
-Distributed under the [GPL-3.0 License](LICENSE).
+[GPL-3.0](LICENSE)
