@@ -44,8 +44,8 @@ def _build_redis_client() -> Optional[redis.Redis]:
         client.ping()
         logger.info("Redis connected")
         return client
-    except Exception as exc:
-        logger.error("Redis connection failed: %s; caching disabled.", exc)
+    except Exception:
+        logger.exception("Redis connection failed; caching disabled.")
         return None
 
 
