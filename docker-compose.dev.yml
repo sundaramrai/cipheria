@@ -83,7 +83,7 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5434}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -95,6 +95,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    # Bind only to the host loopback interface so a host-run API can use Redis
+    # without exposing it to the local network.
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
 
 volumes:
   postgres_data:
