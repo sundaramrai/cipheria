@@ -107,7 +107,7 @@ function VerifyEmailView({ token }: Readonly<{ token: string }>) {
           {state.message}
         </p>
         {!state.loading && (
-          <button className="btn-primary" onClick={() => router.replace('/auth')} style={{ width: '100%' }}>
+          <button type="button" className="btn-primary" onClick={() => router.replace('/auth')} style={{ width: '100%' }}>
             Back to Sign In
           </button>
         )}
@@ -125,7 +125,7 @@ function ResetNotSupportedView() {
         <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: 280 }}>
           Cipheria now uses a single zero-knowledge master password. Lost master passwords cannot be reset.
         </p>
-        <button className="btn-primary" onClick={() => router.replace('/auth')} style={{ width: '100%' }}>
+        <button type="button" className="btn-primary" onClick={() => router.replace('/auth')} style={{ width: '100%' }}>
           Back to Sign In
         </button>
       </div>
@@ -148,7 +148,7 @@ function AuthForm({ initialTab }: Readonly<{ initialTab: 'login' | 'register' }>
         background: 'var(--surface-veil)', borderRadius: 10, padding: 4,
       }}>
         {(['login', 'register'] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} style={{
+          <button key={t} type="button" onClick={() => setTab(t)} style={{
             flex: 1, padding: 'clamp(8px, 2vw, 10px)', borderRadius: 8, border: 'none', cursor: 'pointer',
             background: tab === t ? 'var(--accent)' : 'transparent',
             color: tab === t ? 'var(--accent-ink)' : 'var(--text-secondary)',
@@ -296,6 +296,7 @@ function AuthForm({ initialTab }: Readonly<{ initialTab: 'login' | 'register' }>
       <p style={{ textAlign: 'center', marginTop: 20, fontSize: '0.8rem', color: 'var(--text-secondary)', paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}>
         {tab === 'login' ? "Don't have an account? " : 'Already have an account? '}
         <button
+          type="button"
           onClick={toggleTab}
           style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.8rem', padding: '4px 2px' }}
         >

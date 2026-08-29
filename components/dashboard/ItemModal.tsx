@@ -128,7 +128,7 @@ export function Modal({ children, onClose, title, icon }: Readonly<{
               {title}
             </h3>
           </div>
-          <button onClick={onClose} className="btn-icon" style={{ borderRadius: 8 }}>
+          <button type="button" onClick={onClose} className="btn-icon" style={{ borderRadius: 8 }}>
             <X size={14} />
           </button>
         </div>

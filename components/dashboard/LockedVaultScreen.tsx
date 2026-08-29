@@ -78,7 +78,7 @@ export function LockedVaultScreen({
 
                     <div className="divider" style={{ margin: '14px 0' }} />
 
-                    <button onClick={handleSignout} className="btn-ghost btn-danger"
+                    <button type="button" onClick={handleSignout} className="btn-ghost btn-danger"
                         disabled={signingOut} style={{ width: '100%', minHeight: 42, fontSize: '0.85rem' }}>
                         {signingOut ? 'Signing out…' : 'Sign out of Cipheria'}
                     </button>

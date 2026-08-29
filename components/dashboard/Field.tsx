@@ -44,12 +44,12 @@ export function Field({ label, value, secret, onCopy }: Readonly<{
         </p>
         <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
           {secret && (
-            <button className="btn-icon" onClick={toggleShow} title={show ? 'Hide' : 'Reveal'}>
+            <button type="button" className="btn-icon" onClick={toggleShow} title={show ? 'Hide' : 'Reveal'}>
               {show ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           )}
           {onCopy && (
-            <button className="btn-icon" onClick={handleCopy} title="Copy"
+            <button type="button" className="btn-icon" onClick={handleCopy} title="Copy"
               style={{ color: copied ? 'var(--success)' : undefined }}>
               {copied ? <CheckCheck size={14} /> : <Copy size={14} />}
             </button>
