@@ -16,7 +16,7 @@ function NavButton({ label, disabled, onClick }: Readonly<{
   label: string; disabled: boolean; onClick: () => void;
 }>) {
   return (
-    <button className="btn-icon" disabled={disabled} onClick={onClick}
+    <button type="button" className="btn-icon" disabled={disabled} onClick={onClick}
       aria-label={label === '‹' ? 'Previous page' : 'Next page'}
       style={{ ...BTN_STYLE, opacity: disabled ? 0.3 : 1 }}>
       {label}
@@ -29,7 +29,7 @@ function PageButton({ p, isActive, onPageChange }: Readonly<{
 }>) {
   const handleClick = useCallback(() => onPageChange(p), [onPageChange, p]);
   return (
-    <button onClick={handleClick} aria-current={isActive ? 'page' : undefined}
+    <button type="button" onClick={handleClick} aria-current={isActive ? 'page' : undefined}
       style={{
         minWidth: 30, height: 30, borderRadius: 'var(--radius-sm)',
         border: '1px solid',
