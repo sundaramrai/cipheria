@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import Image from 'next/image';
 import { RotateCcw, Search, Plus, Shield, Globe, CreditCard, StickyNote, User, Trash2, Download, Star, Edit2, ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -93,7 +93,7 @@ function ItemButton({ item, isSelected, isMobile, iconSize, fontSize, padding, o
 }>) {
     const handleClick = useCallback(() => onSelect(item), [onSelect, item]);
     return (
-        <button onClick={handleClick} style={{
+        <button type="button" onClick={handleClick} style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
             borderRadius: 10, border: 'none', cursor: 'pointer', marginBottom: 2,
             background: isSelected ? 'var(--accent-dim)' : 'transparent',
@@ -219,28 +219,28 @@ function ItemDetailActions({ item, btnPad, iconPx, deletingId, onFav, onEdit, on
     return (
         <div style={{ display: 'flex', gap: btnPad === '8px 10px' ? 4 : 8 }}>
             {item.is_deleted ? (
-                <button onClick={onRestore} className="btn-ghost" style={{ padding: btnPad }}>
+                <button type="button" onClick={onRestore} className="btn-ghost" style={{ padding: btnPad }}>
                     <RotateCcw size={iconPx} />
                 </button>
             ) : (
                 <>
-                    <button onClick={onFav} className="btn-ghost" style={{ padding: btnPad }}>
+                    <button type="button" onClick={onFav} className="btn-ghost" style={{ padding: btnPad }}>
                         <Star size={iconPx}
                             color={item.is_favourite ? 'var(--accent)' : 'var(--text-secondary)'}
                             fill={item.is_favourite ? 'var(--accent)' : 'none'} />
                     </button>
-                    <button onClick={onEdit} className="btn-ghost" style={{ padding: btnPad }}>
+                    <button type="button" onClick={onEdit} className="btn-ghost" style={{ padding: btnPad }}>
                         <Edit2 size={iconPx} />
                     </button>
                 </>
             )}
             {!item.is_deleted && (
-                <button onClick={onDelete} className="btn-ghost" disabled={deletingId === item.id} style={dangerStyle}>
+                <button type="button" onClick={onDelete} className="btn-ghost" disabled={deletingId === item.id} style={dangerStyle}>
                     <Trash2 size={iconPx} />
                 </button>
             )}
             {item.is_deleted && (
-                <button onClick={onDeletePermanent} className="btn-ghost" disabled={deletingId === item.id} style={dangerStyle}>
+                <button type="button" onClick={onDeletePermanent} className="btn-ghost" disabled={deletingId === item.id} style={dangerStyle}>
                     <Trash2 size={iconPx} />
                 </button>
             )}
@@ -362,7 +362,7 @@ function CategoryPill({ label, icon: Icon, isActive, onSelect }: Readonly<{
 }>) {
     const handleClick = useCallback(() => onSelect(), [onSelect]);
     return (
-        <button onClick={handleClick} style={{
+        <button type="button" onClick={handleClick} style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
             borderRadius: 20, border: '1px solid',
             borderColor: isActive ? 'var(--accent)' : 'var(--border)',
@@ -437,6 +437,7 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
     } = props;
 
     const [mobilePanel, setMobilePanel] = useState<'list' | 'detail'>('list');
+    const mobileDetailHistoryRef = useRef(false);
     const categoryPills = useMemo(
         () => CATEGORIES.map(categoryOption => ({
             ...categoryOption,
@@ -449,10 +450,24 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
 
     const handleSelectItemMobile = useCallback((item: VaultItem) => {
         void handleSelectItem(item);
+        // The detail view is a client-side panel rather than a route. Add a
+        // same-page history entry so the device Back button closes it instead
+        // of leaving the dashboard.
+        window.history.pushState(
+            { ...window.history.state, cipheriaMobileDetail: true },
+            '',
+        );
+        mobileDetailHistoryRef.current = true;
         setMobilePanel('detail');
     }, [handleSelectItem]);
 
-    const handleMobileBack = useCallback(() => setMobilePanel('list'), []);
+    const handleMobileBack = useCallback(() => {
+        if (mobileDetailHistoryRef.current) {
+            window.history.back();
+            return;
+        }
+        setMobilePanel('list');
+    }, []);
     const handleAddClose = useCallback(() => setShowAddModal(false), [setShowAddModal]);
     const handleEditClose = useCallback(() => { setShowEditModal(false); setEditForm(null); }, [setShowEditModal, setEditForm]);
     const handleOpenAddModal = useCallback(() => setShowAddModal(true), [setShowAddModal]);
@@ -469,6 +484,16 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
             setMobilePanel('list');
         }
     }, [mobilePanel, selectedItem]);
+
+    useEffect(() => {
+        const handlePopState = (event: PopStateEvent) => {
+            mobileDetailHistoryRef.current = Boolean(event.state?.cipheriaMobileDetail);
+            setMobilePanel(event.state?.cipheriaMobileDetail ? 'detail' : 'list');
+        };
+
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, []);
 
     const detailPanelProps: Omit<ItemDetailPanelProps, 'isMobile' | 'handleDelete'> = {
         selectedItem, selectedItemLoading,
@@ -524,7 +549,7 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                         <input className="input-field" placeholder="Search vault..." value={searchValue}
                             onChange={handleSearchChange} style={{ paddingLeft: 36, fontSize: 'max(16px, 0.9rem)' }} />
                     </div>
-                    {!isTrashView && <button className="btn-primary" onClick={handleOpenAddModal}
+                    {!isTrashView && <button type="button" className="btn-primary" onClick={handleOpenAddModal}
                         style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', flexShrink: 0 }}>
                         <Plus size={16} />
                     </button>}
@@ -537,7 +562,7 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                 {!isSearchActive && <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />}
 
                 <div style={{ borderTop: '1px solid var(--border)', padding: '12px 16px', display: 'flex', gap: 8, paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }}>
-                    <button onClick={handleExport} className="btn-ghost" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', fontSize: '0.8rem' }}>
+                    <button type="button" onClick={handleExport} className="btn-ghost" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', fontSize: '0.8rem' }}>
                         <Download size={14} /> Export
                     </button>
                     <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', padding: '0 8px', opacity: 0.6, flex: 1, justifyContent: 'center', ...ELLIPSIS_STYLE }}>
@@ -580,7 +605,7 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                         <input className="input-field" placeholder="Search vault..." value={searchValue}
                             onChange={handleSearchChange} style={{ paddingLeft: 36 }} />
                     </div>
-                    {!isTrashView && <button className="btn-primary" onClick={handleOpenAddModal}
+                    {!isTrashView && <button type="button" className="btn-primary" onClick={handleOpenAddModal}
                         style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                         <Plus size={16} /> Add Item
                     </button>}
