@@ -161,5 +161,6 @@ export const vaultApi = {
 
   deletePermanent: (id: string) => api.delete(`/api/vault/${id}/permanent`),
 
-  export: () => api.get('/api/vault/export/json'),
+  export: (includeDeleted = false) =>
+    api.get('/api/vault/export/json', { params: includeDeleted ? { include_deleted: true } : undefined }),
 };
