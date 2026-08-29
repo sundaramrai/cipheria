@@ -60,12 +60,12 @@ def export_vault(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_user: DBUser,
+    include_deleted: Annotated[bool, Query()] = False,
 ):
-    items = (
-        db.query(VaultItem)
-        .filter(VaultItem.user_id == current_user.id, VaultItem.is_deleted.is_(False))
-        .all()
-    )
+    filters = [VaultItem.user_id == current_user.id]
+    if not include_deleted:
+        filters.append(VaultItem.is_deleted.is_(False))
+    items = db.query(VaultItem).filter(*filters).all()
 
     _log_action(db, current_user.id, "VAULT_EXPORT", request)
     db.commit()
@@ -334,6 +334,18 @@ def restore_item(
     )
     if not item:
         raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
+
+    if item.is_deleted:
+        active_count = (
+            db.query(func.count(VaultItem.id))
+            .filter(VaultItem.user_id == current_user.id, VaultItem.is_deleted.is_(False))
+            .scalar()
+        )
+        if active_count >= VAULT_ITEM_LIMIT:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Vault item limit of {VAULT_ITEM_LIMIT} reached",
+            )
 
     item.is_deleted = False
     item.deleted_at = None
