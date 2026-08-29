@@ -12,14 +12,25 @@ const AUTH_SYNC_STORAGE_KEY = 'cipheria:auth-event';
 
 let tabId: string | null = null;
 
+function createSecureEventId(): string {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  // randomUUID is unavailable in older browsers and non-secure local contexts.
+  // getRandomValues is widely supported there and remains cryptographically strong.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function getTabId() {
   if (globalThis.window === undefined) return 'server';
   if (tabId) return tabId;
 
-  tabId =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  tabId = createSecureEventId();
 
   return tabId;
 }
@@ -27,10 +38,7 @@ function getTabId() {
 function createEvent(type: AuthSyncEvent['type'], user?: UserProfile): AuthSyncEvent {
   return {
     type,
-    id:
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: createSecureEventId(),
     tabId: getTabId(),
     ...(user ? { user } : {}),
   };
