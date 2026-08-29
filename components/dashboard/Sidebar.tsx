@@ -74,7 +74,7 @@ export function DesktopSidebar({ user, category, sidebarCounts, setCategory, han
         {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
           const count = sidebarCounts[id as keyof typeof sidebarCounts] ?? 0;
           return (
-            <button key={id} onClick={() => setCategory(id as Category)}
+            <button key={id} type="button" onClick={() => setCategory(id as Category)}
               className={`nav-item${category === id && !isTrashView && !isFavouritesView ? ' active' : ''}`}>
               <Icon size={15} style={{ flexShrink: 0 }} />
               {label}
@@ -82,12 +82,12 @@ export function DesktopSidebar({ user, category, sidebarCounts, setCategory, han
             </button>
           );
         })}
-        <button onClick={onToggleFavourites} className={`nav-item${isFavouritesView ? ' active' : ''}`}>
+        <button type="button" onClick={onToggleFavourites} className={`nav-item${isFavouritesView ? ' active' : ''}`}>
           <Star size={15} style={{ flexShrink: 0 }} />
           Favourites
           <span className="count">{sidebarCounts.favourites}</span>
         </button>
-        <button onClick={onToggleTrash} className={`nav-item${isTrashView ? ' active' : ''}`}>
+        <button type="button" onClick={onToggleTrash} className={`nav-item${isTrashView ? ' active' : ''}`}>
           <Archive size={15} style={{ flexShrink: 0 }} />
           Trash
           <span className="count">{sidebarCounts.trash}</span>
@@ -96,16 +96,16 @@ export function DesktopSidebar({ user, category, sidebarCounts, setCategory, han
 
       {/* Footer */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 12 }}>
-        <button onClick={handleExport} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
+        <button type="button" onClick={handleExport} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
           <Download size={13} /> Export Vault
         </button>
-        <button onClick={onOpenSettings} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
+        <button type="button" onClick={onOpenSettings} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
           <Settings size={13} /> Settings
         </button>
-        <button onClick={lockVault} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
+        <button type="button" onClick={lockVault} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
           <Lock size={13} /> Lock Vault
         </button>
-        <button onClick={handleSignout} disabled={signingOut}
+        <button type="button" onClick={handleSignout} disabled={signingOut}
           className="btn-ghost btn-danger"
           style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
           <LogOut size={13} /> {signingOut ? 'Signing out…' : 'Sign Out'}
@@ -143,7 +143,7 @@ export function MobileTopBar({ mobilePanel, selectedItem, onBack, lockVault, han
       {/* Left: back or logo */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {showBack ? (
-          <button onClick={onBack} style={{
+          <button type="button" onClick={onBack} style={{
             background: 'none', border: 'none', color: 'var(--accent)',
             cursor: 'pointer', fontSize: '0.875rem', padding: '4px 0',
             display: 'flex', alignItems: 'center', gap: 4,
@@ -168,13 +168,13 @@ export function MobileTopBar({ mobilePanel, selectedItem, onBack, lockVault, han
 
       {/* Right: actions */}
       <div style={{ display: 'flex', gap: 4 }}>
-        <button onClick={onOpenSettings} className="btn-icon" title="Settings" style={{ width: 38, height: 38 }}>
+        <button type="button" onClick={onOpenSettings} className="btn-icon" title="Settings" style={{ width: 38, height: 38 }}>
           <Settings size={17} />
         </button>
-        <button onClick={lockVault} className="btn-icon" title="Lock Vault" style={{ width: 38, height: 38 }}>
+        <button type="button" onClick={lockVault} className="btn-icon" title="Lock Vault" style={{ width: 38, height: 38 }}>
           <Lock size={17} />
         </button>
-        <button onClick={handleSignout} disabled={signingOut} className="btn-icon" title="Sign Out"
+        <button type="button" onClick={handleSignout} disabled={signingOut} className="btn-icon" title="Sign Out"
           style={{ width: 38, height: 38, color: signingOut ? 'var(--text-tertiary)' : 'var(--danger)', opacity: signingOut ? 0.5 : 1 }}>
           <LogOut size={17} />
         </button>
