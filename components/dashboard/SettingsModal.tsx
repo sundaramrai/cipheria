@@ -198,7 +198,7 @@ export function SettingsModal({
             <h4 style={{ color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 600 }}>Master Password</h4>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.6 }}>
-            You can change your master password only while the vault is unlocked. Cipheria re-encrypts your active vault items with the new password and rotates your vault salt.
+            You can change your master password only while the vault is unlocked. Cipheria re-encrypts every vault item, including items in trash, with the new password and rotates your vault salt.
           </p>
           <form onSubmit={onChangeMasterPassword} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
