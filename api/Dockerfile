@@ -17,12 +17,17 @@ CMD ["uv", "run", "uvicorn", "index:app", "--host", "0.0.0.0", "--port", "8000",
 FROM base AS runner
 
 COPY api/pyproject.toml api/uv.lock ./
-RUN uv sync --frozen --no-install-project --group dev
+RUN uv sync --frozen --no-install-project --group dev \
+    && groupadd --system cipheria \
+    && useradd --system --gid cipheria --create-home cipheria
 
-COPY api ./
-COPY alembic ../alembic
-COPY alembic.ini ../alembic.ini
+COPY --chown=cipheria:cipheria api ./
+COPY --chown=cipheria:cipheria alembic ../alembic
+COPY --chown=cipheria:cipheria alembic.ini ../alembic.ini
+RUN chown -R cipheria:cipheria /app/api
+
+USER cipheria
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "index:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD [".venv/bin/uvicorn", "index:app", "--host", "0.0.0.0", "--port", "8000"]
