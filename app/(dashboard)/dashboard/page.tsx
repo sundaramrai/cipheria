@@ -114,7 +114,7 @@ function reconcileVisibleItems(
   searchTerm: string,
   page: number,
 ): VaultItem[] {
-  const existing = items.find((item) => item.id === before?.id || item.id === after?.id);
+  const existing = items.some((item) => item.id === before?.id || item.id === after?.id);
   let nextItems = before
     ? items.filter((item) => item.id !== before.id)
     : [...items];
@@ -200,7 +200,6 @@ function useVaultUnlock(
           update('Unlocking vault...');
           const { data: listResult } = await authApi.unlock(verifier);
           const items: VaultItem[] = listResult.items;
-          setVaultKey(key);
           update('Decrypting items...');
           const decryptedItems = await Promise.all(
             items.map(async (item) => {
@@ -223,6 +222,10 @@ function useVaultUnlock(
             listResult.total_pages ?? 1,
             listResult.total ?? 0,
           );
+          // Make the vault visible only after its first page and view cache are
+          // populated. Otherwise the dashboard can render its empty state
+          // between unlocking and the asynchronous decryption work finishing.
+          setVaultKey(key);
           setMasterPassword('');
         },
         'Vault unlocked',
@@ -937,7 +940,7 @@ export default function Page() {
       const newSalt = generateSaltHex();
       const nextKey = await deriveKey(masterPasswordForm.password, newSalt);
       const nextVerifier = await deriveMasterPasswordVerifier(masterPasswordForm.password, newSalt);
-      const { data } = await vaultApi.export();
+      const { data } = await vaultApi.export(true);
       const items = await Promise.all(
         (data.items as Array<{ id: string; encrypted_data: string }>).map(async (item) => {
           const payload = await decryptData(item.encrypted_data, cryptoKey);
