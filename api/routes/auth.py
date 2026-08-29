@@ -657,18 +657,18 @@ def change_master_password(
     db: Annotated[Session, Depends(get_db)],
     current_user: DBUser,
 ):
-    active_items = (
+    vault_items = (
         db.query(VaultItem)
-        .filter(VaultItem.user_id == current_user.id, VaultItem.is_deleted.is_(False))
+        .filter(VaultItem.user_id == current_user.id)
         .all()
     )
-    if len(active_items) != len(body.items):
+    if len(vault_items) != len(body.items):
         raise HTTPException(
             status_code=400,
-            detail="All active vault items must be re-encrypted before changing the master password",
+            detail="All vault items, including items in trash, must be re-encrypted before changing the master password",
         )
 
-    item_map = {str(item.id): item for item in active_items}
+    item_map = {str(item.id): item for item in vault_items}
     for update in body.items:
         item = item_map.get(str(update.id))
         if not item:
