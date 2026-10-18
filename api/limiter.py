@@ -1,6 +1,7 @@
 from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+
 from settings import get_redis_url, is_production
 
 _redis_url = get_redis_url()
