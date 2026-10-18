@@ -1,11 +1,36 @@
 'use client';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Globe, CreditCard, StickyNote, User, Plus, Edit2, X, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { Plus, Edit2, X, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { generatePassword, passwordStrength } from '@/lib/crypto';
+import type { DecryptedPayload } from '@/lib/types';
+import { ITEM_CATEGORIES } from './types';
 import type { ItemForm } from './types';
 
+export const ITEM_FIELDS = {
+  url: { label: 'URL', copyLabel: 'URL', id: 'login-url', placeholder: 'https://github.com' },
+  username: { label: 'Username / Email', copyLabel: 'Username', id: 'login-username', placeholder: 'you@example.com' },
+  password: { label: 'Password', copyLabel: 'Password', secret: true },
+  cardNumber: { label: 'Card Number', copyLabel: 'Card number', id: 'form-card-number', placeholder: '4111 1111 1111 1111', secret: true, style: { fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' } },
+  cardHolder: { label: 'Cardholder Name', copyLabel: 'Cardholder', id: 'form-card-holder', placeholder: 'Jane Smith' },
+  expiry: { label: 'Expiry', copyLabel: 'Expiry', id: 'form-expiry', placeholder: 'MM / YY' },
+  cvv: { label: 'CVV', copyLabel: 'CVV', id: 'form-cvv', placeholder: '•••', secret: true },
+  firstName: { label: 'First Name', copyLabel: 'First name', id: 'form-first-name', placeholder: 'Jane' },
+  lastName: { label: 'Last Name', copyLabel: 'Last name', id: 'form-last-name', placeholder: 'Smith' },
+  phone: { label: 'Phone', copyLabel: 'Phone', id: 'form-phone', placeholder: '+1 555 000 0000' },
+  address: { label: 'Address', id: 'form-address', placeholder: '123 Main St, City', multiline: true },
+  notes: { label: 'Notes', multiline: true },
+} as const satisfies Record<keyof DecryptedPayload, { label: string; copyLabel?: string; id?: string; placeholder?: string; secret?: boolean; multiline?: boolean; style?: React.CSSProperties }>;
+
+const PASSWORD_GENERATOR_OPTIONS = {
+  length: 20,
+  uppercase: true,
+  lowercase: true,
+  numbers: true,
+  symbols: true,
+} as const;
+
 /* Field label */
-export function FieldLabel({ htmlFor, children }: Readonly<{ htmlFor: string; children: React.ReactNode }>) {
+function FieldLabel({ htmlFor, children }: Readonly<{ htmlFor: string; children: React.ReactNode }>) {
   return (
     <label htmlFor={htmlFor} style={{
       display: 'flex', alignItems: 'center', gap: 5,
@@ -19,24 +44,13 @@ export function FieldLabel({ htmlFor, children }: Readonly<{ htmlFor: string; ch
 }
 
 /* Category picker */
-const CATEGORY_CONFIG: ReadonlyArray<{
-  value: ItemForm['category'];
-  label: string;
-  icon: typeof Globe;
-}> = [
-  { value: 'login', label: 'Login', icon: Globe },
-  { value: 'card', label: 'Card', icon: CreditCard },
-  { value: 'note', label: 'Note', icon: StickyNote },
-  { value: 'identity', label: 'Identity', icon: User },
-] as const;
-
-export function CategoryPicker({ value, onChange }: Readonly<{ value: ItemForm['category']; onChange: (v: ItemForm['category']) => void }>) {
+function CategoryPicker({ value, onChange }: Readonly<{ value: ItemForm['category']; onChange: (v: ItemForm['category']) => void }>) {
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-      {CATEGORY_CONFIG.map(({ value: v, label, icon: Icon }) => {
-        const active = value === v;
+      {ITEM_CATEGORIES.map(({ id, pickerLabel, icon: Icon }) => {
+        const active = value === id;
         return (
-          <button key={v} type="button" onClick={() => onChange(v)} style={{
+          <button key={id} type="button" onClick={() => onChange(id)} style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '6px 13px', borderRadius: 100,
             border: `1px solid ${active ? 'var(--accent-border-focus)' : 'var(--border)'}`,
@@ -47,7 +61,7 @@ export function CategoryPicker({ value, onChange }: Readonly<{ value: ItemForm['
             minHeight: 32, fontWeight: active ? 500 : 400,
           }}>
             <Icon size={12} strokeWidth={active ? 2.2 : 1.8} />
-            {label}
+            {pickerLabel}
           </button>
         );
       })}
@@ -166,14 +180,6 @@ function StrengthBar({ password }: Readonly<{ password: string }>) {
   );
 }
 
-type PasswordGeneratorOptions = {
-  length: number;
-  uppercase: boolean;
-  lowercase: boolean;
-  numbers: boolean;
-  symbols: boolean;
-};
-
 function useFormField<T extends ItemForm>(form: T, setForm: (f: T) => void) {
   return useCallback(
     (key: keyof T) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -182,25 +188,34 @@ function useFormField<T extends ItemForm>(form: T, setForm: (f: T) => void) {
   );
 }
 
+function FormInput({ name, form, onChange }: Readonly<{
+  name: Exclude<keyof DecryptedPayload, 'password' | 'notes'>;
+  form: ItemForm;
+  onChange: (key: keyof ItemForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
+}>) {
+  const definition = ITEM_FIELDS[name];
+  return (
+    <div>
+      <FieldLabel htmlFor={definition.id}>{definition.label}</FieldLabel>
+      <input id={definition.id} className="input-field" placeholder={definition.placeholder}
+        type={'secret' in definition && definition.secret ? 'password' : 'text'}
+        value={form[name]} onChange={onChange(name)}
+        style={'style' in definition ? definition.style : undefined} />
+    </div>
+  );
+}
+
 /* Login form fields */
-function LoginFormFields({ form, setForm, genOptions }: Readonly<{ form: ItemForm; setForm: (f: ItemForm) => void; genOptions: PasswordGeneratorOptions }>) {
+function LoginFormFields({ form, setForm }: Readonly<{ form: ItemForm; setForm: (f: ItemForm) => void }>) {
   const [showPw, setShowPw] = useState(false);
   const field = useFormField(form, setForm);
   const toggleShow = useCallback(() => setShowPw(v => !v), []);
-  const generatePw = useCallback(() => setForm({ ...form, password: generatePassword(genOptions) }), [form, setForm, genOptions]);
+  const generatePw = useCallback(() => setForm({ ...form, password: generatePassword(PASSWORD_GENERATOR_OPTIONS) }), [form, setForm]);
 
   return (
     <>
-      <div>
-        <FieldLabel htmlFor="login-url">URL</FieldLabel>
-        <input id="login-url" className="input-field" placeholder="https://github.com"
-          value={form.url} onChange={field('url')} />
-      </div>
-      <div>
-        <FieldLabel htmlFor="login-username">Username / Email</FieldLabel>
-        <input id="login-username" className="input-field" placeholder="you@example.com"
-          value={form.username} onChange={field('username')} />
-      </div>
+      <FormInput name="url" form={form} onChange={field} />
+      <FormInput name="username" form={form} onChange={field} />
       <div>
         <FieldLabel htmlFor="login-password">Password</FieldLabel>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -233,71 +248,38 @@ function LoginFormFields({ form, setForm, genOptions }: Readonly<{ form: ItemFor
 }
 
 /* Card form fields */
-function CardFormFields({ form, setForm, prefix }: Readonly<{ form: ItemForm; setForm: (f: ItemForm) => void; prefix: string }>) {
+function CardFormFields({ form, setForm }: Readonly<{ form: ItemForm; setForm: (f: ItemForm) => void }>) {
   const field = useFormField(form, setForm);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div>
-        <FieldLabel htmlFor={`${prefix}-card-number`}>Card Number</FieldLabel>
-        <input id={`${prefix}-card-number`} className="input-field" placeholder="4111 1111 1111 1111"
-          value={form.cardNumber} onChange={field('cardNumber')}
-          style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }} />
-      </div>
-      <div>
-        <FieldLabel htmlFor={`${prefix}-card-holder`}>Cardholder Name</FieldLabel>
-        <input id={`${prefix}-card-holder`} className="input-field" placeholder="Jane Smith"
-          value={form.cardHolder} onChange={field('cardHolder')} />
-      </div>
+      <FormInput name="cardNumber" form={form} onChange={field} />
+      <FormInput name="cardHolder" form={form} onChange={field} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <div>
-          <FieldLabel htmlFor={`${prefix}-expiry`}>Expiry</FieldLabel>
-          <input id={`${prefix}-expiry`} className="input-field" placeholder="MM / YY"
-            value={form.expiry} onChange={field('expiry')} />
-        </div>
-        <div>
-          <FieldLabel htmlFor={`${prefix}-cvv`}>CVV</FieldLabel>
-          <input id={`${prefix}-cvv`} className="input-field" placeholder="•••" type="password"
-            value={form.cvv} onChange={field('cvv')} />
-        </div>
+        <FormInput name="expiry" form={form} onChange={field} />
+        <FormInput name="cvv" form={form} onChange={field} />
       </div>
     </div>
   );
 }
 
 /* Identity form fields */
-function IdentityFormFields({ form, setForm, prefix }: Readonly<{ form: ItemForm; setForm: (f: ItemForm) => void; prefix: string }>) {
+function IdentityFormFields({ form, setForm }: Readonly<{ form: ItemForm; setForm: (f: ItemForm) => void }>) {
   const field = useFormField(form, setForm);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <div>
-          <FieldLabel htmlFor={`${prefix}-first-name`}>First Name</FieldLabel>
-          <input id={`${prefix}-first-name`} className="input-field" placeholder="Jane"
-            value={form.firstName} onChange={field('firstName')} />
-        </div>
-        <div>
-          <FieldLabel htmlFor={`${prefix}-last-name`}>Last Name</FieldLabel>
-          <input id={`${prefix}-last-name`} className="input-field" placeholder="Smith"
-            value={form.lastName} onChange={field('lastName')} />
-        </div>
+        <FormInput name="firstName" form={form} onChange={field} />
+        <FormInput name="lastName" form={form} onChange={field} />
       </div>
-      <div>
-        <FieldLabel htmlFor={`${prefix}-phone`}>Phone</FieldLabel>
-        <input id={`${prefix}-phone`} className="input-field" placeholder="+1 555 000 0000"
-          value={form.phone} onChange={field('phone')} />
-      </div>
-      <div>
-        <FieldLabel htmlFor={`${prefix}-address`}>Address</FieldLabel>
-        <input id={`${prefix}-address`} className="input-field" placeholder="123 Main St, City"
-          value={form.address} onChange={field('address')} />
-      </div>
+      <FormInput name="phone" form={form} onChange={field} />
+      <FormInput name="address" form={form} onChange={field} />
     </div>
   );
 }
 
 /* Shared form body */
-export function ItemFormBody({ form, setForm, genOptions, submitLabel, submitting, onClose }: Readonly<{
-  form: ItemForm; setForm: (f: ItemForm) => void; genOptions: PasswordGeneratorOptions;
+function ItemFormBody({ form, setForm, submitLabel, submitting, onClose }: Readonly<{
+  form: ItemForm; setForm: (f: ItemForm) => void;
   submitLabel: string; submitting: boolean; onClose: () => void;
 }>) {
   const field = useFormField(form, setForm);
@@ -319,9 +301,9 @@ export function ItemFormBody({ form, setForm, genOptions, submitLabel, submittin
 
       <div className="hairline" />
 
-      {form.category === 'login' && <LoginFormFields form={form} setForm={setForm} genOptions={genOptions} />}
-      {form.category === 'card' && <CardFormFields form={form} setForm={setForm} prefix="form" />}
-      {form.category === 'identity' && <IdentityFormFields form={form} setForm={setForm} prefix="form" />}
+      {form.category === 'login' && <LoginFormFields form={form} setForm={setForm} />}
+      {form.category === 'card' && <CardFormFields form={form} setForm={setForm} />}
+      {form.category === 'identity' && <IdentityFormFields form={form} setForm={setForm} />}
 
       <div>
         <FieldLabel htmlFor="form-notes">Notes</FieldLabel>
@@ -348,7 +330,6 @@ interface ItemModalProps {
   form: ItemForm;
   setForm: (f: ItemForm) => void;
   saving: boolean;
-  genOptions: PasswordGeneratorOptions;
   onSubmit: (e: React.SyntheticEvent) => void;
   onClose: () => void;
   mode: 'add' | 'edit';
@@ -359,13 +340,13 @@ const MODAL_CONFIG = {
   edit: { title: 'Edit Item', submitLabel: 'Save Changes', icon: <Edit2 size={14} color="var(--accent)" /> },
 } as const;
 
-function ItemModal({ form, setForm, saving, genOptions, onSubmit, onClose, mode }: Readonly<ItemModalProps>) {
+function ItemModal({ form, setForm, saving, onSubmit, onClose, mode }: Readonly<ItemModalProps>) {
   const { title, submitLabel, icon } = MODAL_CONFIG[mode];
   return (
     <Modal onClose={onClose} title={title} icon={icon}>
       <form onSubmit={onSubmit} autoComplete="off">
         <ItemFormBody
-          form={form} setForm={setForm} genOptions={genOptions}
+          form={form} setForm={setForm}
           submitLabel={submitLabel} submitting={saving} onClose={onClose}
         />
       </form>
@@ -373,16 +354,16 @@ function ItemModal({ form, setForm, saving, genOptions, onSubmit, onClose, mode 
   );
 }
 
-export function AddItemModal({ newItem, setNewItem, savingItem, genOptions, onSubmit, onClose }: Readonly<{
-  newItem: ItemForm; setNewItem: (f: ItemForm) => void; savingItem: boolean; genOptions: PasswordGeneratorOptions;
+export function AddItemModal({ newItem, setNewItem, savingItem, onSubmit, onClose }: Readonly<{
+  newItem: ItemForm; setNewItem: (f: ItemForm) => void; savingItem: boolean;
   onSubmit: (e: React.SyntheticEvent) => void; onClose: () => void;
 }>) {
-  return <ItemModal mode="add" form={newItem} setForm={setNewItem} saving={savingItem} genOptions={genOptions} onSubmit={onSubmit} onClose={onClose} />;
+  return <ItemModal mode="add" form={newItem} setForm={setNewItem} saving={savingItem} onSubmit={onSubmit} onClose={onClose} />;
 }
 
-export function EditItemModal({ editForm, setEditForm, updatingItem, genOptions, onSubmit, onClose }: Readonly<{
-  editForm: ItemForm; setEditForm: (f: ItemForm) => void; updatingItem: boolean; genOptions: PasswordGeneratorOptions;
+export function EditItemModal({ editForm, setEditForm, updatingItem, onSubmit, onClose }: Readonly<{
+  editForm: ItemForm; setEditForm: (f: ItemForm) => void; updatingItem: boolean;
   onSubmit: (e: React.SyntheticEvent) => void; onClose: () => void;
 }>) {
-  return <ItemModal mode="edit" form={editForm} setForm={setEditForm} saving={updatingItem} genOptions={genOptions} onSubmit={onSubmit} onClose={onClose} />;
+  return <ItemModal mode="edit" form={editForm} setForm={setEditForm} saving={updatingItem} onSubmit={onSubmit} onClose={onClose} />;
 }
