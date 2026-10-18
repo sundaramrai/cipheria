@@ -10,10 +10,6 @@ const NAV_ITEMS = [
   ...ITEM_CATEGORIES,
 ] as const;
 
-const ELLIPSIS_STYLE = {
-  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-} as const;
-
 interface DesktopSidebarProps {
   user: Pick<UserProfile, 'email'> | null;
   category: Category;
@@ -33,74 +29,58 @@ export function DesktopSidebar({ user, category, sidebarCounts, setCategory, han
   const { signingOut, handleSignout } = useSignOut(handleLogout);
 
   return (
-    <aside className="desktop-sidebar" style={{
-      flex: '0 1 18%',
-      minWidth: 220,
-      maxWidth: 300,
-      borderRight: '1px solid var(--border)',
-      flexDirection: 'column',
-      padding: '20px 12px',
-      background: 'var(--bg-card)', gap: 0,
-    }}>
+    <aside className="hidden w-[230px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-card)] px-3 py-5 lg:flex xl:w-[260px] 2xl:w-[300px]">
       {/* Logo */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '6px 8px 20px', borderBottom: '1px solid var(--border)', marginBottom: 12,
-      }}>
-        <div style={{
-          width: 30, height: 30, borderRadius: 8, background: 'var(--accent)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0, boxShadow: 'var(--logo-shadow)',
-        }}>
+      <div className="mb-3 flex items-center gap-2.5 border-b border-[var(--border)] px-2 pt-1.5 pb-5">
+        <div className="flex size-[30px] shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] shadow-[var(--logo-shadow)]">
           <Key size={15} color="var(--accent-ink)" strokeWidth={2.5} />
         </div>
-        <span className="font-display" style={{ fontSize: '1.35rem', color: 'var(--text-primary)', letterSpacing: '-0.01em', lineHeight: 1 }}>
+        <span className="font-display text-[1.35rem] leading-none tracking-tight text-[var(--text-primary)]">
           Cipheria
         </span>
       </div>
 
       {/* Nav */}
-      <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <nav className="flex flex-1 flex-col gap-0.5">
         {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
           const count = sidebarCounts[id];
           return (
             <button key={id} type="button" onClick={() => setCategory(id)}
               className={`nav-item${category === id && !isTrashView && !isFavouritesView ? ' active' : ''}`}>
-              <Icon size={15} style={{ flexShrink: 0 }} />
+              <Icon size={15} className="shrink-0" />
               {label}
               <span className="count">{count}</span>
             </button>
           );
         })}
         <button type="button" onClick={onToggleFavourites} className={`nav-item${isFavouritesView ? ' active' : ''}`}>
-          <Star size={15} style={{ flexShrink: 0 }} />
+          <Star size={15} className="shrink-0" />
           Favourites
           <span className="count">{sidebarCounts.favourites}</span>
         </button>
         <button type="button" onClick={onToggleTrash} className={`nav-item${isTrashView ? ' active' : ''}`}>
-          <Archive size={15} style={{ flexShrink: 0 }} />
+          <Archive size={15} className="shrink-0" />
           Trash
           <span className="count">{sidebarCounts.trash}</span>
         </button>
       </nav>
 
       {/* Footer */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 12 }}>
-        <button type="button" onClick={handleExport} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
+      <div className="mt-3 flex flex-col gap-1 border-t border-[var(--border)] pt-3">
+        <button type="button" onClick={handleExport} className="nav-item">
           <Download size={13} /> Export Vault
         </button>
-        <button type="button" onClick={onOpenSettings} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
+        <button type="button" onClick={onOpenSettings} className="nav-item">
           <Settings size={13} /> Settings
         </button>
-        <button type="button" onClick={lockVault} className="btn-ghost" style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
+        <button type="button" onClick={lockVault} className="nav-item">
           <Lock size={13} /> Lock Vault
         </button>
         <button type="button" onClick={handleSignout} disabled={signingOut}
-          className="btn-ghost btn-danger"
-          style={{ width: '100%', fontSize: '0.8rem', justifyContent: 'center', padding: '8px 11px', minHeight: 38 }}>
+          className="nav-item !text-[var(--danger)] disabled:opacity-50">
           <LogOut size={13} /> {signingOut ? 'Signing out…' : 'Sign Out'}
         </button>
-        <p style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', textAlign: 'center', paddingTop: 10, ...ELLIPSIS_STYLE }}>
+        <p className="truncate px-3 pt-2 text-xs text-[var(--text-secondary)]">
           {user?.email}
         </p>
       </div>
@@ -123,33 +103,19 @@ export function MobileTopBar({ mobilePanel, selectedItem, onBack, lockVault, han
   const showBack = mobilePanel === 'detail' && selectedItem;
 
   return (
-    <div className="mobile-topbar" style={{
-      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50,
-      background: 'var(--surface-veil-strong)',
-      backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-      borderBottom: '1px solid var(--border)',
-      padding: '11px 14px', alignItems: 'center', justifyContent: 'space-between',
-    }}>
+    <div className="fixed inset-x-0 top-0 z-50 flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface-veil-strong)] px-3.5 py-[11px] backdrop-blur-md lg:hidden">
       {/* Left: back or logo */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="flex items-center gap-2">
         {showBack ? (
-          <button type="button" onClick={onBack} style={{
-            background: 'none', border: 'none', color: 'var(--accent)',
-            cursor: 'pointer', fontSize: '0.875rem', padding: '4px 0',
-            display: 'flex', alignItems: 'center', gap: 4,
-            fontFamily: 'var(--font-body)',
-          }}>
+          <button type="button" onClick={onBack} className="flex cursor-pointer items-center gap-1 py-1 text-sm text-[var(--accent)]">
             ← Back
           </button>
         ) : (
           <>
-            <div style={{
-              width: 26, height: 26, borderRadius: 7, background: 'var(--accent)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
+            <div className="flex size-[26px] items-center justify-center rounded-md bg-[var(--accent)]">
               <Key size={13} color="var(--accent-ink)" strokeWidth={2.5} />
             </div>
-            <span className="font-display" style={{ fontSize: '1.2rem', color: 'var(--text-primary)' }}>
+            <span className="font-display text-xl text-[var(--text-primary)]">
               Cipheria
             </span>
           </>
@@ -157,15 +123,14 @@ export function MobileTopBar({ mobilePanel, selectedItem, onBack, lockVault, han
       </div>
 
       {/* Right: actions */}
-      <div style={{ display: 'flex', gap: 4 }}>
-        <button type="button" onClick={onOpenSettings} className="btn-icon" title="Settings" style={{ width: 38, height: 38 }}>
+      <div className="flex gap-1">
+        <button type="button" onClick={onOpenSettings} className="btn-icon !size-9" title="Settings" aria-label="Settings">
           <Settings size={17} />
         </button>
-        <button type="button" onClick={lockVault} className="btn-icon" title="Lock Vault" style={{ width: 38, height: 38 }}>
+        <button type="button" onClick={lockVault} className="btn-icon !size-9" title="Lock Vault" aria-label="Lock Vault">
           <Lock size={17} />
         </button>
-        <button type="button" onClick={handleSignout} disabled={signingOut} className="btn-icon" title="Sign Out"
-          style={{ width: 38, height: 38, color: signingOut ? 'var(--text-tertiary)' : 'var(--danger)', opacity: signingOut ? 0.5 : 1 }}>
+        <button type="button" onClick={handleSignout} disabled={signingOut} className="btn-icon !size-9 !text-[var(--danger)] disabled:opacity-50" title="Sign Out" aria-label="Sign Out">
           <LogOut size={17} />
         </button>
       </div>
