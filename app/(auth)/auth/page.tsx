@@ -46,7 +46,7 @@ const WARNING_BOX_STYLE = {
   border: '1px solid var(--warning-border)',
 } as const;
 
-function AuxShell({ title, children, centered = false }: Readonly<{ title: string; children: React.ReactNode; centered?: boolean }>) {
+function AuthShell({ title, children, centered = false }: Readonly<{ title?: string; children: React.ReactNode; centered?: boolean }>) {
   return (
     <main
       style={{
@@ -54,10 +54,11 @@ function AuxShell({ title, children, centered = false }: Readonly<{ title: strin
         padding: 'clamp(16px, 5vw, 24px)',
         minHeight: '100dvh',
         display: 'flex',
-        alignItems: 'center',
+        alignItems: title ? 'center' : 'flex-start',
         justifyContent: 'center',
       }}
     >
+      {!title && <style>{`@media (min-height: 640px) { main { align-items: center !important; } }`}</style>}
       <div style={GLOW_STYLE} />
       <div className="animate-fade-up" style={{ width: '100%', maxWidth: 440, position: 'relative', zIndex: 1, margin: '0 auto' }}>
         <div className="flex items-center gap-3 justify-center" style={{ marginBottom: 'clamp(24px, 6vw, 40px)' }}>
@@ -67,7 +68,7 @@ function AuxShell({ title, children, centered = false }: Readonly<{ title: strin
           <span className="font-display text-3xl" style={{ color: 'var(--text-primary)' }}>Cipheria</span>
         </div>
         <div className="glass" style={{ ...CARD_STYLE, textAlign: centered ? 'center' : 'left' }}>
-          <h2 className="font-display" style={{ fontSize: '1.6rem', color: 'var(--text-primary)', marginBottom: 16 }}>{title}</h2>
+          {title && <h2 className="font-display" style={{ fontSize: '1.6rem', color: 'var(--text-primary)', marginBottom: 16 }}>{title}</h2>}
           {children}
         </div>
       </div>
@@ -101,7 +102,7 @@ function VerifyEmailView({ token }: Readonly<{ token: string }>) {
   }, [token]);
 
   return (
-    <AuxShell title="Email Verification" centered>
+    <AuthShell title="Email Verification" centered>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
         <p style={{ color: state.error ? 'var(--danger)' : 'var(--text-secondary)', lineHeight: 1.6, maxWidth: 280 }}>
           {state.message}
@@ -112,7 +113,7 @@ function VerifyEmailView({ token }: Readonly<{ token: string }>) {
           </button>
         )}
       </div>
-    </AuxShell>
+    </AuthShell>
   );
 }
 
@@ -120,7 +121,7 @@ function ResetNotSupportedView() {
   const router = useRouter();
 
   return (
-    <AuxShell title="Reset Not Supported" centered>
+    <AuthShell title="Reset Not Supported" centered>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
         <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: 280 }}>
           Cipheria now uses a single zero-knowledge master password. Lost master passwords cannot be reset.
@@ -129,7 +130,7 @@ function ResetNotSupportedView() {
           Back to Sign In
         </button>
       </div>
-    </AuxShell>
+    </AuthShell>
   );
 }
 
@@ -353,50 +354,25 @@ function AuthPageContent() {
   if (mode === 'reset-password') return <ResetNotSupportedView />;
   if (checkingSession) {
     return (
-      <AuxShell title="Opening Cipheria" centered>
+      <AuthShell title="Opening Cipheria" centered>
         <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
           Checking your session...
         </p>
-      </AuxShell>
+      </AuthShell>
     );
   }
   if (isAuthenticated && !mode && cryptoKey) return null;
   if (isAuthenticated && !mode && !cryptoKey) {
     return (
-      <AuxShell title="Opening Vault" centered>
+      <AuthShell title="Opening Vault" centered>
         <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
           Redirecting to your dashboard...
         </p>
-      </AuxShell>
+      </AuthShell>
     );
   }
 
-  return (
-    <main
-      style={{
-        background: 'var(--bg)',
-        padding: 'clamp(16px, 5vw, 24px)',
-        minHeight: '100dvh',
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'center',
-      }}
-    >
-      <style>{`@media (min-height: 640px) { main { align-items: center !important; } }`}</style>
-      <div style={GLOW_STYLE} />
-      <div className="animate-fade-up" style={{ width: '100%', maxWidth: 440, position: 'relative', zIndex: 1, margin: '0 auto' }}>
-        <div className="flex items-center gap-3 justify-center" style={{ marginBottom: 'clamp(24px, 6vw, 40px)' }}>
-          <div style={LOGO_WRAP_STYLE}>
-            <Key size={22} color="var(--accent-ink)" strokeWidth={2.5} />
-          </div>
-          <span className="font-display text-3xl" style={{ color: 'var(--text-primary)' }}>Cipheria</span>
-        </div>
-        <div className="glass" style={CARD_STYLE}>
-          <AuthForm key={initialTab} initialTab={initialTab} />
-        </div>
-      </div>
-    </main>
-  );
+  return <AuthShell><AuthForm key={initialTab} initialTab={initialTab} /></AuthShell>;
 }
 
 export default function Page() {
