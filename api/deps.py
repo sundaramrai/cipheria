@@ -72,7 +72,7 @@ def get_current_user_from_db(
         logger.debug("user cache HIT id=%s", user_id)
         try:
             cached_user = deserialize_cached_user(token_user.id, cached)
-        except Exception as exc:
+        except (AttributeError, TypeError, ValueError) as exc:
             logger.warning("Corrupt user cache entry id=%s: %s", user_id, exc)
         else:
             if not cached_user.is_active:
