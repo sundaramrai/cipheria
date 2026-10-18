@@ -228,20 +228,43 @@ h4 {
 
 /* Layout: sidebar / topbar responsive */
 .desktop-sidebar {
-  display: flex !important;
+  display: flex;
 }
 
 .mobile-topbar {
-  display: none !important;
+  display: none;
 }
 
-@media (max-width: 767px) {
+.desktop-list-col {
+  display: flex;
+}
+
+.desktop-detail-col {
+  display: block;
+}
+
+.mobile-list-panel,
+.mobile-detail-panel {
+  display: none;
+}
+
+@media (max-width: 768px) {
   .desktop-sidebar {
-    display: none !important;
+    display: none;
+  }
+
+  .desktop-list-col,
+  .desktop-detail-col {
+    display: none;
   }
 
   .mobile-topbar {
-    display: flex !important;
+    display: flex;
+  }
+
+  .mobile-list-panel.is-active,
+  .mobile-detail-panel.is-active {
+    display: flex;
   }
 }
 
@@ -428,14 +451,14 @@ h4 {
 
 /* Danger variant */
 .btn-danger {
-  color: var(--danger) !important;
-  border-color: var(--danger-border-soft) !important;
+  color: var(--danger);
+  border-color: var(--danger-border-soft);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: var(--danger-dim) !important;
-  border-color: var(--danger-border-strong) !important;
-  color: var(--danger-hover-text) !important;
+  background: var(--danger-dim);
+  border-color: var(--danger-border-strong);
+  color: var(--danger-hover-text);
 }
 
 /* Icon button */
