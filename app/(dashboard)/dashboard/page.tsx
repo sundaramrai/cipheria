@@ -340,8 +340,10 @@ export default function Page() {
     try {
       await navigator.clipboard.writeText(text);
       toastService.success(`${label} copied!`);
+      return true;
     } catch {
       toastService.error(`Failed to copy ${label.toLowerCase()}`);
+      return false;
     }
   }, []);
 
@@ -488,10 +490,10 @@ export default function Page() {
   }, [applyOptimisticMutation, getKnownItemById, page, refreshCurrentView, selectedItem]);
 
   const handleDeletePermanent = useCallback(async (id: string) => {
-    if (deletingId) return;
+    if (deletingId) return false;
     setDeletingId(id);
     try {
-      await toastService.withProgress(
+      const deleted = await toastService.withProgress(
         'Item deleting permanently...',
         async () => {
           const previousItem = getKnownItemById(id);
@@ -502,10 +504,12 @@ export default function Page() {
           } else {
             await refreshCurrentView(page);
           }
+          return true;
         },
         'Item permanently deleted',
         { fallbackError: 'Failed to permanently delete item' },
       );
+      return deleted === true;
     } finally {
       setDeletingId(null);
     }
