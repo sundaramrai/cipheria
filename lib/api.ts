@@ -22,7 +22,7 @@ const AUTO_REFRESH_EXCLUDED_PATHS = [
  */
 let _refreshPromise: Promise<string> | null = null;
 
-export const api = axios.create({
+const api = axios.create({
   timeout: 15_000,
   headers: { 'Content-Type': 'application/json' },
   withCredentials: true, // send HttpOnly refresh-token cookie automatically
@@ -59,8 +59,11 @@ api.interceptors.response.use(
               return data.access_token as string;
             });
           _refreshPromise = promise;
-          // Clear after current tick so concurrent callers still hit the same promise
-          promise.finally(() => { _refreshPromise = null; });
+          // Handle both outcomes so the cleanup does not create a rejected promise.
+          void promise.then(
+            () => { _refreshPromise = null; },
+            () => { _refreshPromise = null; },
+          );
         }
         const newToken = await _refreshPromise;
         original.headers = original.headers ?? {};
@@ -121,6 +124,7 @@ export const authApi = {
     api.patch<UserProfile>('/api/auth/profile', data),
 
   changeMasterPassword: (data: {
+    current_master_password_verifier: string;
     new_vault_salt: string;
     new_master_password_verifier: string;
     master_hint?: string | null;
