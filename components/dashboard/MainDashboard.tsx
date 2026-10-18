@@ -8,7 +8,7 @@ import { CATEGORY_ICONS, ITEM_CATEGORIES } from './types';
 import { DesktopSidebar, MobileTopBar } from './Sidebar';
 import { Pagination } from './Pagination';
 import { Field, HibpCheck } from './Field';
-import { AddItemModal, EditItemModal, ITEM_FIELDS } from './ItemModal';
+import { AddItemModal, EditItemModal, ITEM_FIELDS, Modal } from './ItemModal';
 import type { DecryptedPayload, SidebarCounts, UserProfile, VaultItem } from '@/lib/types';
 import type { Category, ItemForm } from './types';
 
@@ -86,7 +86,7 @@ function ItemButton({ item, isSelected, isMobile, onSelect }: Readonly<{
                 <p className="truncate text-sm font-medium text-[var(--text-primary)]">
                     {item.name}
                 </p>
-                <p className="truncate text-xs text-[var(--text-secondary)]">
+                <p className="truncate text-[13px] font-normal text-[var(--text-secondary)]">
                     {item.decrypted?.username || item.decrypted?.url || item.category}
                 </p>
             </div>
@@ -134,7 +134,7 @@ function ItemList({ items, loading, selectedId, onSelect, variant }: Readonly<{
 
 function FieldRows({ d, copy, hibp, onCheckHibp }: Readonly<{
     d: DecryptedPayload;
-    copy: (val: string, label: string) => () => void;
+    copy: (val: string, label: string) => () => Promise<boolean>;
     hibp: HibpState;
     onCheckHibp: () => void;
 }>) {
@@ -157,7 +157,7 @@ function FieldRows({ d, copy, hibp, onCheckHibp }: Readonly<{
 
 function ItemDetailFields({ selectedItem, copyToClipboard, hibp, setHibp }: Readonly<{
     selectedItem: VaultItem;
-    copyToClipboard: (text: string, label: string) => void | Promise<void>;
+    copyToClipboard: (text: string, label: string) => Promise<boolean>;
     hibp: HibpState;
     setHibp: (v: HibpState) => void;
 }>) {
@@ -174,7 +174,7 @@ function ItemDetailFields({ selectedItem, copyToClipboard, hibp, setHibp }: Read
         catch { setHibp({ checking: false, count: -1 }); }
     }, [password, setHibp]);
 
-    return <FieldRows d={d} copy={copy} hibp={hibp} onCheckHibp={handleCheckHibp} />;
+    return <FieldRows key={selectedItem.id} d={d} copy={copy} hibp={hibp} onCheckHibp={handleCheckHibp} />;
 }
 
 function ItemDetailActions({ item, deletingId, onFav, onEdit, onDelete, onRestore, onDeletePermanent }: Readonly<{
@@ -277,7 +277,7 @@ interface ItemDetailPanelProps {
     handleRestoreItem?: (id: string) => MaybePromiseVoid;
     handleDeletePermanent?: (id: string) => MaybePromiseVoid;
     deletingId: string | null;
-    copyToClipboard: (text: string, label: string) => MaybePromiseVoid;
+    copyToClipboard: (text: string, label: string) => Promise<boolean>;
     hibp: HibpState;
     setHibp: (v: HibpState) => void;
 }
@@ -322,16 +322,18 @@ function CategoryPill({ label, icon: Icon, isActive, onSelect }: Readonly<{
 }>) {
     return (
         <button type="button" onClick={onSelect}
+            data-trash-navigation={label === 'Trash' ? '' : undefined}
             className={`flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 py-2 text-xs ${isActive ? 'border-[var(--accent)] bg-[var(--accent-dim)] text-[var(--accent)]' : 'border-[var(--border)] text-[var(--text-secondary)]'}`}>
             <Icon size={13} /> {label}
         </button>
     );
 }
 
-function EmptyView({ title, description, icon: Icon }: Readonly<{
+function EmptyView({ title, description, icon: Icon, action }: Readonly<{
     title: string;
     description: string;
     icon: LucideIcon;
+    action?: React.ReactNode;
 }>) {
     return (
         <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center text-[var(--text-secondary)]">
@@ -340,6 +342,7 @@ function EmptyView({ title, description, icon: Icon }: Readonly<{
             </div>
             <h2 className="font-display text-2xl text-[var(--text-primary)]">{title}</h2>
             <p className="max-w-sm text-sm">{description}</p>
+            {action && <div className="mt-3">{action}</div>}
         </div>
     );
 }
@@ -389,9 +392,9 @@ interface MainDashboardProps {
     handleOpenEdit: (item: VaultItem) => void;
     handleDelete: (id: string, cb?: () => void) => MaybePromiseVoid;
     handleRestoreItem: (id: string) => MaybePromiseVoid;
-    handleDeletePermanent: (id: string) => MaybePromiseVoid;
+    handleDeletePermanent: (id: string) => Promise<boolean>;
     deletingId: string | null;
-    copyToClipboard: (text: string, label: string) => MaybePromiseVoid;
+    copyToClipboard: (text: string, label: string) => Promise<boolean>;
     hibp: HibpState;
     setHibp: (value: HibpState) => void;
     showAddModal: boolean;
@@ -425,7 +428,22 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
     } = props;
 
     const [mobilePanel, setMobilePanel] = useState<'list' | 'detail'>('list');
+    const [pendingPermanentDelete, setPendingPermanentDelete] = useState<{ id: string; name: string } | null>(null);
     const mobileDetailHistoryRef = useRef(false);
+    const closePermanentDelete = useCallback(() => setPendingPermanentDelete(null), []);
+    const requestPermanentDelete = useCallback((id: string) => {
+        if (selectedItem?.id === id) setPendingPermanentDelete({ id, name: selectedItem.name });
+    }, [selectedItem]);
+    const confirmPermanentDelete = useCallback(async () => {
+        if (!pendingPermanentDelete || deletingId) return;
+        if (await handleDeletePermanent(pendingPermanentDelete.id)) {
+            setPendingPermanentDelete(null);
+            requestAnimationFrame(() => {
+                const trashButtons = document.querySelectorAll<HTMLButtonElement>('[data-trash-navigation]');
+                Array.from(trashButtons).find(button => button.getClientRects().length > 0)?.focus();
+            });
+        }
+    }, [deletingId, handleDeletePermanent, pendingPermanentDelete]);
     const handleSelectItemMobile = useCallback((item: VaultItem) => {
         void handleSelectItem(item);
         // The detail view is a client-side panel rather than a route. Add a
@@ -481,34 +499,35 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
 
     const detailPanelProps: Omit<ItemDetailPanelProps, 'isMobile' | 'handleDelete'> = {
         selectedItem, selectedItemLoading,
-        handleToggleFav, handleOpenEdit, handleRestoreItem, handleDeletePermanent, deletingId, copyToClipboard, hibp, setHibp,
+        handleToggleFav, handleOpenEdit, handleRestoreItem, handleDeletePermanent: requestPermanentDelete,
+        deletingId, copyToClipboard, hibp, setHibp,
     };
+    const hasSearch = searchValue.trim().length > 0;
     const hasNoItems = !searchLoading && filteredItems.length === 0;
-    const emptyViewTitle = searchValue ? 'No matching items'
+    const showEmptyCategory = hasNoItems && !hasSearch;
+    const emptyViewTitle = hasSearch ? 'No matching items'
         : isTrashView ? 'Trash is empty'
             : isFavouritesView ? 'No favourites yet'
                 : category === 'all' ? 'Your vault is empty'
                     : `No ${ITEM_CATEGORIES.find(({ id }) => id === category)?.label.toLowerCase() ?? 'items'} yet`;
-    const emptyViewDescription = searchValue ? 'Try a different search term.'
+    const emptyViewDescription = hasSearch ? 'Try a different search term.'
         : isTrashView ? 'Deleted items will appear here.'
             : isFavouritesView ? 'Favourite an item to find it here.'
                 : category === 'all' ? 'Items you add will appear here.'
                     : 'Items in this category will appear here.';
-    const emptyViewIcon = searchValue ? Search
+    const emptyViewIcon = hasSearch ? Search
         : isTrashView ? Trash2
             : isFavouritesView ? Star : CATEGORY_ICONS[category] || Shield;
     const emptyCategoryLabel = isTrashView ? 'Trash'
         : isFavouritesView ? 'Favourites'
             : category === 'all' ? 'All Items'
                 : ITEM_CATEGORIES.find(({ id }) => id === category)?.label ?? 'Items';
-    const desktopEmptyCopy = searchValue
-        ? { title: 'Nothing matched your search.', description: 'Try another term or clear the search to see your items.' }
-        : isTrashView
+    const desktopEmptyCopy = isTrashView
             ? { title: 'Nothing in the trash.', description: 'Items you delete will appear here until you remove them permanently.' }
             : isFavouritesView
                 ? { title: 'Keep favourites close.', description: 'Star an item and it will appear here for quick access.' }
                 : EMPTY_CATEGORY_COPY[category];
-    const emptyAction = searchValue
+    const emptyAction = hasSearch
         ? <button type="button" className="btn-ghost" onClick={() => onSearchChange('')}>Clear search</button>
         : !isTrashView && !isFavouritesView
             ? <button type="button" className="btn-primary" onClick={() => {
@@ -568,7 +587,8 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
 
                 <div className="flex-1 overflow-y-auto p-2">
                     {hasNoItems
-                        ? <EmptyView title={emptyViewTitle} description={emptyViewDescription} icon={emptyViewIcon} />
+                        ? <EmptyView title={emptyViewTitle} description={emptyViewDescription} icon={emptyViewIcon}
+                            action={hasSearch ? emptyAction : undefined} />
                         : <ItemList variant="mobile" items={filteredItems} loading={searchLoading} onSelect={handleSelectItemMobile} />}
                 </div>
 
@@ -600,16 +620,11 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                 onToggleTrash={onToggleTrash} isFavouritesView={isFavouritesView} isTrashView={isTrashView}
             />
 
-            {hasNoItems ? (
+            {showEmptyCategory ? (
                 <div className="hidden min-w-0 flex-1 overflow-y-auto lg:block">
                     <div className="mx-auto grid min-h-full w-full max-w-[1200px] grid-cols-2 items-center gap-10 px-8 py-12 xl:gap-16 xl:px-12">
                         <div className="min-w-0">
                             <p className="mb-6 text-xs font-medium uppercase tracking-[0.2em] text-[var(--accent)]">{emptyCategoryLabel} / 0 items</p>
-                            {searchValue && <div className="relative mb-8 w-full max-w-[420px]">
-                                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
-                                <input className="input-field vault-search-input" aria-label="Search vault" placeholder="Search vault..." value={searchValue}
-                                    onChange={handleSearchChange} />
-                            </div>}
                             <h1 className="font-display text-4xl leading-tight text-[var(--text-primary)] xl:text-5xl">{desktopEmptyCopy.title}</h1>
                             <p className="mt-5 max-w-md text-base leading-7 text-[var(--text-secondary)]">{desktopEmptyCopy.description}</p>
                             {emptyAction && <div className="mt-8">{emptyAction}</div>}
@@ -622,14 +637,17 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                     <div className="hidden w-[320px] shrink-0 flex-col border-r border-[var(--border)] xl:w-[380px] 2xl:w-[480px] lg:flex">
                         {desktopControls}
                         <div className="flex-1 overflow-y-auto p-2">
-                            <ItemList variant="desktop" items={filteredItems} loading={searchLoading}
-                                selectedId={selectedItem?.id} onSelect={handleSelectItem} />
+                            {hasNoItems ? <p className="px-3 py-4 text-sm text-[var(--text-secondary)]">0 matches</p>
+                                : <ItemList variant="desktop" items={filteredItems} loading={searchLoading}
+                                    selectedId={selectedItem?.id} onSelect={handleSelectItem} />}
                         </div>
                         <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
                     </div>
 
                     <div className="hidden min-w-0 flex-1 overflow-y-auto px-6 py-8 lg:block xl:px-10 xl:py-10">
-                        <ItemDetailPanel {...detailPanelProps} handleDelete={handleDelete} />
+                        {hasNoItems
+                            ? <EmptyView title={emptyViewTitle} description={emptyViewDescription} icon={emptyViewIcon} action={emptyAction} />
+                            : <ItemDetailPanel {...detailPanelProps} handleDelete={handleDelete} />}
                     </div>
                 </>
             )}
@@ -641,6 +659,20 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
             {showEditModal && editForm && (
                 <EditItemModal editForm={editForm} setEditForm={setEditForm} updatingItem={updatingItem}
                     onSubmit={handleEditItem} onClose={handleEditClose} />
+            )}
+            {pendingPermanentDelete && (
+                <Modal title="Delete permanently?" icon={<Trash2 size={17} color="var(--danger)" />}
+                    onClose={closePermanentDelete} closeDisabled={Boolean(deletingId)}>
+                    <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                        Delete <strong className="text-[var(--text-primary)]">{pendingPermanentDelete.name}</strong> permanently? This cannot be undone.
+                    </p>
+                    <div className="mt-6 flex justify-end gap-3">
+                        <button type="button" className="btn-ghost" onClick={closePermanentDelete} disabled={Boolean(deletingId)}>Cancel</button>
+                        <button type="button" className="btn-ghost btn-danger" onClick={() => { void confirmPermanentDelete(); }} disabled={Boolean(deletingId)}>
+                            <Trash2 size={16} /> {deletingId ? 'Deleting…' : 'Delete permanently'}
+                        </button>
+                    </div>
+                </Modal>
             )}
         </div>
     );
