@@ -1,5 +1,5 @@
 'use client';
-import { Fragment, useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import Image from 'next/image';
 import { RotateCcw, Search, Plus, Shield, Globe, Trash2, Download, Star, Edit2, ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -151,19 +151,19 @@ function FieldRows({ d, copy, hibp, onCheckHibp }: Readonly<{
     onCheckHibp: () => void;
 }>) {
     return (
-        <>
+        <div className="detail-field-grid">
             {(Object.keys(ITEM_FIELDS) as (keyof DecryptedPayload)[]).map((name) => {
                 const value = d[name];
                 if (!value) return null;
                 const definition: { label: string; copyLabel?: string; secret?: boolean; multiline?: boolean } = ITEM_FIELDS[name];
-                return <Fragment key={name}>
+                return <div key={name} className={definition.multiline ? 'detail-field-wide' : undefined}>
                     <Field label={definition.label} value={value} secret={definition.secret}
                         multiline={definition.multiline}
                         onCopy={definition.copyLabel ? copy(value, definition.copyLabel) : undefined} />
                     {name === 'password' && <HibpCheck hibp={hibp} onCheck={onCheckHibp} />}
-                </Fragment>;
+                </div>;
             })}
-        </>
+        </div>
     );
 }
 
@@ -186,11 +186,7 @@ function ItemDetailFields({ selectedItem, copyToClipboard, hibp, setHibp }: Read
         catch { setHibp({ checking: false, count: -1 }); }
     }, [password, setHibp]);
 
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <FieldRows d={d} copy={copy} hibp={hibp} onCheckHibp={handleCheckHibp} />
-        </div>
-    );
+    return <FieldRows d={d} copy={copy} hibp={hibp} onCheckHibp={handleCheckHibp} />;
 }
 
 function ItemDetailActions({ item, btnPad, iconPx, deletingId, onFav, onEdit, onDelete, onRestore, onDeletePermanent }: Readonly<{
@@ -321,7 +317,7 @@ function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, handleTo
     );
 
     return (
-        <div className="animate-fade-up" style={isMobile ? undefined : { width: '100%', maxWidth: 720 }}>
+        <div className="animate-fade-up">
             <ItemDetailHeader
                 item={selectedItem} isMobile={isMobile}
                 handleToggleFav={handleToggleFav} handleOpenEdit={handleOpenEdit}
