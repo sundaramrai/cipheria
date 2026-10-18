@@ -58,7 +58,7 @@ export function DesktopSidebar({ user, category, sidebarCounts, setCategory, han
           Favourites
           <span className="count">{sidebarCounts.favourites}</span>
         </button>
-        <button type="button" onClick={onToggleTrash} className={`nav-item${isTrashView ? ' active' : ''}`}>
+        <button type="button" data-trash-navigation="" onClick={onToggleTrash} className={`nav-item${isTrashView ? ' active' : ''}`}>
           <Archive size={15} className="shrink-0" />
           Trash
           <span className="count">{sidebarCounts.trash}</span>
