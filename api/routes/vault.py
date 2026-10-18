@@ -3,21 +3,15 @@ Vault CRUD with Redis caching.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Annotated, Literal, Optional
+from datetime import UTC, datetime
+from typing import Annotated, Literal
 from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from database import get_db, VaultItem, AuditLog
-from schemas import (
-    VaultItemCreate,
-    VaultItemUpdate,
-    VaultItemResponse,
-    PaginatedVaultResponse,
-)
-from deps import CurrentSubject, DBUser
+from audit import log_action
 from cache import (
     get_cached_vault_item,
     get_cached_vault_list,
@@ -26,7 +20,15 @@ from cache import (
     set_cached_vault_item,
     set_cached_vault_list,
 )
-from limiter import limiter, get_client_ip
+from database import VaultItem, get_db
+from deps import CurrentSubject, DBUser
+from limiter import limiter
+from schemas import (
+    PaginatedVaultResponse,
+    VaultItemCreate,
+    VaultItemResponse,
+    VaultItemUpdate,
+)
 from vault_counts import get_cached_sidebar_counts_for_user
 from vault_serializers import serialize_vault_item
 
@@ -37,17 +39,6 @@ router = APIRouter(prefix="/vault", tags=["vault"])
 ITEM_NOT_FOUND_MSG = "Item not found"
 MAX_PAGE_SIZE = 100
 VAULT_ITEM_LIMIT = 1000
-
-
-def _log_action(db: Session, user_id, action: str, request: Request) -> None:
-    db.add(
-        AuditLog(
-            user_id=user_id,
-            action=action,
-            ip_address=get_client_ip(request),
-            user_agent=request.headers.get("user-agent"),
-        )
-    )
 
 
 def _sanitise_search(search: str) -> str:
@@ -67,7 +58,7 @@ def export_vault(
         filters.append(VaultItem.is_deleted.is_(False))
     items = db.query(VaultItem).filter(*filters).all()
 
-    _log_action(db, current_user.id, "VAULT_EXPORT", request)
+    log_action(db, current_user.id, "VAULT_EXPORT", request)
     db.commit()
 
     logger.info("VAULT_EXPORT user=%s items=%s", current_user.id, len(items))
@@ -94,8 +85,8 @@ def export_vault(
 def list_items(
     db: Annotated[Session, Depends(get_db)],
     current_user: CurrentSubject,
-    category: Annotated[Optional[Literal["login", "card", "note", "identity"]], Query()] = None,
-    search: Annotated[Optional[str], Query(max_length=128)] = None,
+    category: Annotated[Literal["login", "card", "note", "identity"] | None, Query()] = None,
+    search: Annotated[str | None, Query(max_length=128)] = None,
     favourites_only: Annotated[bool, Query()] = False,
     deleted_only: Annotated[bool, Query()] = False,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -306,7 +297,7 @@ def delete_item(
         raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
 
     item.is_deleted = True
-    item.deleted_at = datetime.now(timezone.utc)
+    item.deleted_at = datetime.now(UTC)
     db.commit()
 
     invalidate_vault_item(user_id, item_key)
