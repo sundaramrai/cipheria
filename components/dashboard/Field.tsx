@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Eye, EyeOff, Copy, CheckCheck } from 'lucide-react';
 
 const COPY_RESET_MS = 1600;
@@ -8,17 +8,33 @@ export function Field({ label, value, secret, multiline, onCopy }: Readonly<{
   value: string;
   secret?: boolean;
   multiline?: boolean;
-  onCopy?: () => void;
+  onCopy?: () => Promise<boolean>;
 }>) {
   const [show, setShow] = useState(!secret);
   const [copied, setCopied] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleCopy = useCallback(() => {
-    if (!onCopy) return;
-    onCopy();
-    setCopied(true);
-    setTimeout(() => setCopied(false), COPY_RESET_MS);
-  }, [onCopy]);
+  useEffect(() => () => {
+    if (copyResetRef.current) clearTimeout(copyResetRef.current);
+  }, []);
+
+  const handleCopy = useCallback(async () => {
+    if (!onCopy || copying) return;
+    setCopying(true);
+    setCopied(false);
+    if (copyResetRef.current) clearTimeout(copyResetRef.current);
+    try {
+      if (await onCopy()) {
+        setCopied(true);
+        copyResetRef.current = setTimeout(() => setCopied(false), COPY_RESET_MS);
+      }
+    } catch {
+      setCopied(false);
+    } finally {
+      setCopying(false);
+    }
+  }, [onCopy, copying]);
 
   const toggleShow = useCallback(() => setShow(s => !s), []);
 
@@ -26,11 +42,11 @@ export function Field({ label, value, secret, multiline, onCopy }: Readonly<{
 
   return (
     <div className="px-4 py-4 sm:px-5">
-      <p className="mb-1.5 text-xs font-medium tracking-wide text-[var(--text-secondary)]">
+      <p className="mb-1.5 text-[13px] font-medium tracking-wide text-[var(--text-secondary)]">
         {label}
       </p>
       <div className="flex min-w-0 items-center gap-3">
-        <p className={`min-w-0 flex-1 [overflow-wrap:anywhere] text-base leading-6 text-[var(--text-primary)] ${secret ? 'font-mono' : ''} ${masked ? 'tracking-widest' : ''} ${multiline ? 'whitespace-pre-wrap' : ''}`}>
+        <p className={`min-w-0 flex-1 [overflow-wrap:anywhere] text-base font-normal leading-6 text-[var(--text-primary)] ${secret ? 'font-mono' : ''} ${masked ? 'tracking-widest' : ''} ${multiline ? 'whitespace-pre-wrap' : ''}`}>
           {masked ? '••••••••••••' : value}
         </p>
         <div className="flex shrink-0 items-center gap-1">
@@ -40,7 +56,7 @@ export function Field({ label, value, secret, multiline, onCopy }: Readonly<{
             </button>
           )}
           {onCopy && (
-            <button type="button" className={`btn-icon !size-9 ${copied ? '!text-[var(--success)]' : ''}`} onClick={handleCopy}
+            <button type="button" className={`btn-icon !size-9 ${copied ? '!text-[var(--success)]' : ''}`} onClick={() => { void handleCopy(); }} disabled={copying}
               title={copied ? `${label} copied` : `Copy ${label}`} aria-label={copied ? `${label} copied` : `Copy ${label}`}>
               {copied ? <CheckCheck size={17} /> : <Copy size={17} />}
             </button>
