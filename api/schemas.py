@@ -1,12 +1,12 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional, List
 from datetime import datetime
 from uuid import UUID
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 HEX_64_REGEX = "^[0-9a-fA-F]{64}$"
 
 
-def _validate_favicon_url(v: Optional[str]) -> Optional[str]:
+def _validate_favicon_url(v: str | None) -> str | None:
     if v is not None and not v.startswith("https://"):
         raise ValueError("favicon_url must be a valid HTTPS URL")
     return v
@@ -18,8 +18,8 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     vault_salt: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
     master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
-    full_name: Optional[str] = Field(None, max_length=128)
-    master_hint: Optional[str] = Field(None, max_length=256)
+    full_name: str | None = Field(None, max_length=128)
+    master_hint: str | None = Field(None, max_length=256)
 
 
 class LoginChallengeRequest(BaseModel):
@@ -42,9 +42,9 @@ class MessageResponse(BaseModel):
 class UserResponse(BaseModel):
     id: UUID
     email: str
-    full_name: Optional[str] = None
+    full_name: str | None = None
     vault_salt: str
-    master_hint: Optional[str] = None
+    master_hint: str | None = None
     email_verified: bool = False
     created_at: datetime
 
@@ -69,8 +69,8 @@ class VerifyEmailResponse(BaseModel):
 
 
 class UpdateProfileRequest(BaseModel):
-    full_name: Optional[str] = Field(None, max_length=128)
-    master_hint: Optional[str] = Field(None, max_length=256)
+    full_name: str | None = Field(None, max_length=128)
+    master_hint: str | None = Field(None, max_length=256)
 
 
 class MasterPasswordItemUpdate(BaseModel):
@@ -79,10 +79,11 @@ class MasterPasswordItemUpdate(BaseModel):
 
 
 class ChangeMasterPasswordRequest(BaseModel):
+    current_master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
     new_vault_salt: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
     new_master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
-    master_hint: Optional[str] = Field(None, max_length=256)
-    items: List[MasterPasswordItemUpdate]
+    master_hint: str | None = Field(None, max_length=256)
+    items: list[MasterPasswordItemUpdate]
 
 
 class DeleteAccountRequest(BaseModel):
@@ -99,25 +100,25 @@ class VaultItemCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     category: str = Field(default="login", pattern="^(login|card|note|identity)$")
     encrypted_data: str = Field(..., min_length=1, max_length=100_000)
-    favicon_url: Optional[str] = Field(None, max_length=512)
+    favicon_url: str | None = Field(None, max_length=512)
     is_favourite: bool = False
 
     @field_validator("favicon_url")
     @classmethod
-    def validate_favicon_url(cls, v: Optional[str]) -> Optional[str]:
+    def validate_favicon_url(cls, v: str | None) -> str | None:
         return _validate_favicon_url(v)
 
 
 class VaultItemUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    category: Optional[str] = Field(None, pattern="^(login|card|note|identity)$")
-    encrypted_data: Optional[str] = Field(None, min_length=1, max_length=100_000)
-    favicon_url: Optional[str] = Field(None, max_length=512)
-    is_favourite: Optional[bool] = None
+    name: str | None = Field(None, min_length=1, max_length=255)
+    category: str | None = Field(None, pattern="^(login|card|note|identity)$")
+    encrypted_data: str | None = Field(None, min_length=1, max_length=100_000)
+    favicon_url: str | None = Field(None, max_length=512)
+    is_favourite: bool | None = None
 
     @field_validator("favicon_url")
     @classmethod
-    def validate_favicon_url(cls, v: Optional[str]) -> Optional[str]:
+    def validate_favicon_url(cls, v: str | None) -> str | None:
         return _validate_favicon_url(v)
 
 
@@ -126,10 +127,10 @@ class VaultItemSummary(BaseModel):
     id: UUID
     name: str
     category: str
-    favicon_url: Optional[str] = None
+    favicon_url: str | None = None
     is_favourite: bool
     is_deleted: bool = False
-    deleted_at: Optional[datetime] = None
+    deleted_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -143,10 +144,10 @@ class VaultItemResponse(BaseModel):
     name: str
     category: str
     encrypted_data: str
-    favicon_url: Optional[str] = None
+    favicon_url: str | None = None
     is_favourite: bool
     is_deleted: bool = False
-    deleted_at: Optional[datetime] = None
+    deleted_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -165,16 +166,16 @@ class VaultSidebarCountsResponse(BaseModel):
 
 
 class PaginatedVaultResponse(BaseModel):
-    items: List[VaultItemSummary]
+    items: list[VaultItemSummary]
     total: int
     page: int
     page_size: int
     total_pages: int
-    sidebar_counts: Optional[VaultSidebarCountsResponse] = None
+    sidebar_counts: VaultSidebarCountsResponse | None = None
 
 
 class UnlockedVaultResponse(BaseModel):
-    items: List[VaultItemResponse]
+    items: list[VaultItemResponse]
     total: int
     page: int
     page_size: int
