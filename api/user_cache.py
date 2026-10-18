@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -8,12 +8,12 @@ from pydantic import BaseModel
 class CachedUser(BaseModel):
     id: UUID
     email: str
-    full_name: Optional[str] = None
+    full_name: str | None = None
     is_active: bool = True
     email_verified: bool = False
-    master_hint: Optional[str] = None
+    master_hint: str | None = None
     vault_salt: str
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 
 
 def serialize_cached_user(user: Any) -> dict[str, Any]:
