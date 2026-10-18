@@ -3,7 +3,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-
 # Load the application's single environment file before Redis and rate limiting
 # are configured, while preserving environment variables supplied at deployment.
 _ENV_DIR = Path(__file__).resolve().parent
