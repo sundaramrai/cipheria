@@ -12,6 +12,7 @@ type ProfileForm = {
 };
 
 type MasterPasswordForm = {
+  current_password: string;
   password: string;
   confirm: string;
   master_hint: string;
@@ -201,6 +202,18 @@ export function SettingsModal({
             You can change your master password only while the vault is unlocked. Cipheria re-encrypts every vault item, including items in trash, with the new password and rotates your vault salt.
           </p>
           <form onSubmit={onChangeMasterPassword} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <label htmlFor="settings-current-master-password" style={labelStyle}>CURRENT MASTER PASSWORD</label>
+              <input
+                id="settings-current-master-password"
+                className="input-field"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={masterPasswordForm.current_password}
+                onChange={(e) => setMasterPasswordForm({ ...masterPasswordForm, current_password: e.target.value })}
+              />
+            </div>
             <div>
               <label htmlFor="settings-new-master-password" style={labelStyle}>NEW MASTER PASSWORD</label>
               <input
