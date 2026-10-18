@@ -14,8 +14,6 @@ interface AuthStore {
   setVaultKey: (key: CryptoKey) => void;
   setVaultItems: (items: VaultItem[]) => void;
   updateVaultItem: (id: string, item: VaultItem) => void;
-  removeVaultItem: (id: string) => void;
-  addVaultItem: (item: VaultItem) => void;
   logout: () => void;
   lockVault: () => void;
   restoreSession: () => Promise<boolean>;
@@ -48,12 +46,6 @@ export const useAuthStore = create<AuthStore>((set) => ({
     set((state) => ({
       vaultItems: state.vaultItems.map((v) => (v.id === id ? item : v)),
     })),
-
-  addVaultItem: (item) =>
-    set((state) => ({ vaultItems: [item, ...state.vaultItems] })),
-
-  removeVaultItem: (id) =>
-    set((state) => ({ vaultItems: state.vaultItems.filter((v) => v.id !== id) })),
 
   lockVault: () => set({ cryptoKey: null, isVaultLocked: true, vaultItems: [] }),
 
