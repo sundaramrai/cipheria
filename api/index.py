@@ -1,17 +1,19 @@
-import sys 
-import os
 import logging
+import os
+import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy.exc import InterfaceError, OperationalError
+
 from limiter import limiter
 from routes.auth import router as auth_router
 from routes.vault import router as vault_router
