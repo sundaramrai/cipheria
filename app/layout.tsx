@@ -87,7 +87,7 @@ export default function RootLayout({ children }: { readonly children: React.Reac
           }}
         />
         <Analytics />
-        <SpeedInsights/>
+        <SpeedInsights />
       </body>
     </html>
   );
