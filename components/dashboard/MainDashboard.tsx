@@ -17,23 +17,26 @@ const CATEGORIES = [
     ...ITEM_CATEGORIES,
 ] as const;
 
-const ELLIPSIS_STYLE = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const;
+const EMPTY_CATEGORY_COPY: Record<Category, { title: string; description: string; action: string }> = {
+    all: { title: 'Your vault starts here.', description: 'Keep your logins, cards, notes, and identities together in one private place.', action: 'Add your first item' },
+    login: { title: 'Keep your logins close.', description: 'Save a login to keep its username and password together.', action: 'Add a login' },
+    card: { title: 'Your cards, within reach.', description: 'Save a payment card so its details are easy to find when you need them.', action: 'Add a card' },
+    note: { title: 'A place for private notes.', description: 'Save information you want to keep in your vault.', action: 'Add a note' },
+    identity: { title: 'Your details, in one place.', description: 'Save an identity to keep personal details together.', action: 'Add an identity' },
+};
+
 const passthroughImageLoader = ({ src }: { src: string }) => src;
 type HibpState = { checking: boolean; count: number | null };
 type MaybePromiseVoid = void | Promise<void>;
-function SearchSkeleton({ iconSize = 36 }: Readonly<{ iconSize?: number }>) {
+function SearchSkeleton({ isMobile }: Readonly<{ isMobile: boolean }>) {
     return (
         <>
             {[0, 1, 2, 3, 4].map(i => (
-                <div key={i} className="search-skeleton-item" style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: 12, borderRadius: 10, marginBottom: 2,
-                    animationDelay: `${i * 0.08}s`,
-                }}>
-                    <div style={{ width: iconSize, height: iconSize, borderRadius: 8, background: 'var(--skeleton-2)', flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                        <div style={{ height: 13, width: '55%', borderRadius: 6, background: 'var(--skeleton-2)', marginBottom: 7 }} />
-                        <div style={{ height: 11, width: '38%', borderRadius: 6, background: 'var(--skeleton-1)' }} />
+                <div key={i} className="mb-0.5 flex animate-pulse items-center gap-3 rounded-lg p-3">
+                    <div className={`shrink-0 rounded-lg bg-[var(--skeleton-2)] ${isMobile ? 'size-10' : 'size-9'}`} />
+                    <div className="flex-1">
+                        <div className="mb-2 h-3 w-[55%] rounded-md bg-[var(--skeleton-2)]" />
+                        <div className="h-2.5 w-[38%] rounded-md bg-[var(--skeleton-1)]" />
                     </div>
                 </div>
             ))}
@@ -59,14 +62,11 @@ function FaviconImage({ src, size }: Readonly<{ src: string; size: number }>) {
     );
 }
 
-function ItemIcon({ item, size }: Readonly<{ item: VaultItem; size: number }>) {
+function ItemIcon({ item, isMobile }: Readonly<{ item: VaultItem; isMobile: boolean }>) {
     const Icon = CATEGORY_ICONS[item.category] || Globe;
-    const px = Math.round(size * 0.55);
+    const px = isMobile ? 22 : 20;
     return (
-        <div style={{
-            width: size, height: size, borderRadius: size > 38 ? 10 : 8, flexShrink: 0,
-            background: 'var(--skeleton-1)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-        }}>
+        <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--skeleton-1)] ${isMobile ? 'size-10' : 'size-9'}`}>
             {item.favicon_url
                 ? <FaviconImage src={item.favicon_url} size={px} />
                 : <Icon size={px} color="var(--text-secondary)" />}
@@ -74,33 +74,27 @@ function ItemIcon({ item, size }: Readonly<{ item: VaultItem; size: number }>) {
     );
 }
 
-function ItemButton({ item, isSelected, isMobile, iconSize, fontSize, padding, onSelect }: Readonly<{
+function ItemButton({ item, isSelected, isMobile, onSelect }: Readonly<{
     item: VaultItem; isSelected: boolean; isMobile: boolean;
-    iconSize: number; fontSize: string; padding: string;
     onSelect: (item: VaultItem) => void;
 }>) {
     return (
-        <button type="button" onClick={() => onSelect(item)} style={{
-            width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-            borderRadius: 10, border: 'none', cursor: 'pointer', marginBottom: 2,
-            background: isSelected ? 'var(--accent-dim)' : 'transparent',
-            borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
-            transition: 'all 0.15s', padding,
-        }}>
-            <ItemIcon item={item} size={iconSize} />
-            <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
-                <p style={{ fontSize, color: 'var(--text-primary)', fontWeight: 500, ...ELLIPSIS_STYLE }}>
+        <button type="button" onClick={() => onSelect(item)} aria-current={isSelected ? 'true' : undefined}
+            className={`mb-0.5 flex w-full cursor-pointer items-center gap-3 rounded-lg border-l-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-[var(--accent)] ${isMobile ? 'px-3 py-3.5' : 'p-3'} ${isSelected ? 'border-[var(--accent)] bg-[var(--accent-dim)] hover:bg-[var(--accent-dim)]' : 'border-transparent hover:bg-[var(--bg-elevated)]'}`}>
+            <ItemIcon item={item} isMobile={isMobile} />
+            <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-[var(--text-primary)]">
                     {item.name}
                 </p>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', ...ELLIPSIS_STYLE }}>
+                <p className="truncate text-xs text-[var(--text-secondary)]">
                     {item.decrypted?.username || item.decrypted?.url || item.category}
                 </p>
             </div>
             {item.is_favourite && (
-                <Star size={isMobile ? 14 : 12} color="var(--accent)" fill="var(--accent)" />
+                <Star size={14} color="var(--accent)" fill="var(--accent)" />
             )}
             {isMobile && (
-                <ChevronRight size={16} color="var(--text-secondary)" style={{ opacity: 0.4 }} />
+                <ChevronRight size={16} className="text-[var(--text-secondary)]" />
             )}
         </button>
     );
@@ -114,15 +108,12 @@ function ItemList({ items, loading, selectedId, onSelect, variant }: Readonly<{
     variant: 'mobile' | 'desktop';
 }>) {
     const isMobile = variant === 'mobile';
-    const iconSize = isMobile ? 40 : 36;
-    const padding = isMobile ? '14px 12px' : '12px';
-    const fontSize = isMobile ? '0.9rem' : '0.875rem';
 
-    if (loading) return <SearchSkeleton iconSize={iconSize} />;
+    if (loading) return <SearchSkeleton isMobile={isMobile} />;
     if (!items.length) return (
-        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-secondary)' }}>
-            <Shield size={32} style={{ opacity: 0.3, margin: '0 auto 12px' }} />
-            <p style={{ fontSize: '0.875rem' }}>No items found</p>
+        <div className="px-5 py-10 text-center text-[var(--text-secondary)]">
+            <Shield size={32} className="mx-auto mb-3 opacity-60" />
+            <p className="text-sm">No items found</p>
         </div>
     );
 
@@ -134,9 +125,6 @@ function ItemList({ items, loading, selectedId, onSelect, variant }: Readonly<{
                     item={item}
                     isSelected={!isMobile && selectedId === item.id}
                     isMobile={isMobile}
-                    iconSize={iconSize}
-                    fontSize={fontSize}
-                    padding={padding}
                     onSelect={onSelect}
                 />
             ))}
@@ -151,12 +139,12 @@ function FieldRows({ d, copy, hibp, onCheckHibp }: Readonly<{
     onCheckHibp: () => void;
 }>) {
     return (
-        <div className="detail-field-grid">
+        <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-card)]">
             {(Object.keys(ITEM_FIELDS) as (keyof DecryptedPayload)[]).map((name) => {
                 const value = d[name];
                 if (!value) return null;
                 const definition: { label: string; copyLabel?: string; secret?: boolean; multiline?: boolean } = ITEM_FIELDS[name];
-                return <div key={name} className={definition.multiline ? 'detail-field-wide' : undefined}>
+                return <div key={name} className="border-b border-[var(--border)] last:border-b-0">
                     <Field label={definition.label} value={value} secret={definition.secret}
                         multiline={definition.multiline}
                         onCopy={definition.copyLabel ? copy(value, definition.copyLabel) : undefined} />
@@ -189,38 +177,37 @@ function ItemDetailFields({ selectedItem, copyToClipboard, hibp, setHibp }: Read
     return <FieldRows d={d} copy={copy} hibp={hibp} onCheckHibp={handleCheckHibp} />;
 }
 
-function ItemDetailActions({ item, btnPad, iconPx, deletingId, onFav, onEdit, onDelete, onRestore, onDeletePermanent }: Readonly<{
-    item: VaultItem; btnPad: string; iconPx: number; deletingId: string | null;
+function ItemDetailActions({ item, deletingId, onFav, onEdit, onDelete, onRestore, onDeletePermanent }: Readonly<{
+    item: VaultItem; deletingId: string | null;
     onFav: () => void; onEdit: () => void; onDelete: () => void;
     onRestore: () => void; onDeletePermanent: () => void;
 }>) {
-    const dangerStyle = { padding: btnPad, color: 'var(--danger)', borderColor: 'var(--danger-border-soft)', opacity: deletingId === item.id ? 0.5 : 1 };
     return (
-        <div style={{ display: 'flex', gap: btnPad === '8px 10px' ? 4 : 8 }}>
+        <div className="flex shrink-0 items-center gap-2">
             {item.is_deleted ? (
-                <button type="button" onClick={onRestore} className="btn-ghost" style={{ padding: btnPad }}>
-                    <RotateCcw size={iconPx} />
+                <button type="button" onClick={onRestore} className="btn-ghost !px-3" aria-label="Restore item">
+                    <RotateCcw size={16} /> <span className="hidden sm:inline">Restore</span>
                 </button>
             ) : (
                 <>
-                    <button type="button" onClick={onFav} className="btn-ghost" style={{ padding: btnPad }}>
-                        <Star size={iconPx}
+                    <button type="button" onClick={onFav} className="btn-ghost !px-3" title={item.is_favourite ? 'Remove from favourites' : 'Add to favourites'} aria-label={item.is_favourite ? 'Remove from favourites' : 'Add to favourites'}>
+                        <Star size={16}
                             color={item.is_favourite ? 'var(--accent)' : 'var(--text-secondary)'}
                             fill={item.is_favourite ? 'var(--accent)' : 'none'} />
                     </button>
-                    <button type="button" onClick={onEdit} className="btn-ghost" style={{ padding: btnPad }}>
-                        <Edit2 size={iconPx} />
+                    <button type="button" onClick={onEdit} className="btn-ghost !px-3" aria-label="Edit item">
+                        <Edit2 size={16} /> <span className="hidden sm:inline">Edit</span>
                     </button>
                 </>
             )}
             {!item.is_deleted && (
-                <button type="button" onClick={onDelete} className="btn-ghost" disabled={deletingId === item.id} style={dangerStyle}>
-                    <Trash2 size={iconPx} />
+                <button type="button" onClick={onDelete} className="btn-ghost btn-danger !px-3" disabled={deletingId === item.id} title="Move to trash" aria-label="Move to trash">
+                    <Trash2 size={16} />
                 </button>
             )}
             {item.is_deleted && (
-                <button type="button" onClick={onDeletePermanent} className="btn-ghost" disabled={deletingId === item.id} style={dangerStyle}>
-                    <Trash2 size={iconPx} />
+                <button type="button" onClick={onDeletePermanent} className="btn-ghost btn-danger !px-3" disabled={deletingId === item.id} title="Delete permanently" aria-label="Delete permanently">
+                    <Trash2 size={16} />
                 </button>
             )}
         </div>
@@ -238,9 +225,6 @@ function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, han
     deletingId: string | null;
 }>) {
     const Icon = CATEGORY_ICONS[item.category] || Globe;
-    const iconSize = isMobile ? 48 : 52;
-    const btnPad = isMobile ? '8px 10px' : '8px 12px';
-    const iconPx = isMobile ? 15 : 16;
     const onFav = useCallback(() => {
         void handleToggleFav(item);
     }, [handleToggleFav, item]);
@@ -256,29 +240,26 @@ function ItemDetailHeader({ item, isMobile, handleToggleFav, handleOpenEdit, han
     }, [handleDeletePermanent, item.id]);
 
     return (
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: isMobile ? 24 : 32 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 16 }}>
-                <div style={{
-                    width: iconSize, height: iconSize, borderRadius: isMobile ? 10 : 12,
-                    background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                }}>
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4 sm:mb-8">
+            <div className="flex min-w-0 items-center gap-3">
+                <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] sm:size-12">
                     {item.favicon_url
-                        ? <FaviconImage src={item.favicon_url} size={iconSize - 22} />
-                        : <Icon size={iconSize - 26} color="var(--accent)" />}
+                        ? <FaviconImage src={item.favicon_url} size={26} />
+                        : <Icon size={23} color="var(--accent)" />}
                 </div>
-                <div>
-                    <h2 className="font-display" style={{ fontSize: isMobile ? 'clamp(1.25rem, 5vw, 1.75rem)' : '1.75rem', color: 'var(--text-primary)' }}>
+                <div className="min-w-0">
+                    <h2 className="font-display truncate text-2xl text-[var(--text-primary)] sm:text-3xl">
                         {item.name}
                     </h2>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'capitalize' }}>
-                        {item.category}
-                    </span>
+                    <p className="text-xs text-[var(--text-secondary)] sm:text-sm">
+                        <span className="capitalize">{item.category}</span>
+                        {!isMobile && <> · Updated {new Date(item.updated_at).toLocaleDateString()}</>}
+                    </p>
                 </div>
             </div>
 
             <ItemDetailActions
-                item={item} btnPad={btnPad} iconPx={iconPx} deletingId={deletingId}
+                item={item} deletingId={deletingId}
                 onFav={onFav} onEdit={onEdit} onDelete={onDelete}
                 onRestore={onRestore} onDeletePermanent={onDeletePermanent}
             />
@@ -304,20 +285,20 @@ interface ItemDetailPanelProps {
 function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, handleToggleFav, handleOpenEdit, handleDelete, handleRestoreItem, handleDeletePermanent, deletingId, copyToClipboard, hibp, setHibp }: Readonly<ItemDetailPanelProps>) {
 
     if (!selectedItem) return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 12, opacity: 0.4 }}>
-            <Shield size={48} color="var(--text-secondary)" />
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Select an item to view details</p>
+        <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--text-secondary)]">
+            <Shield size={40} className="opacity-70" />
+            <p className="text-sm">Select an item to view details</p>
         </div>
     );
 
     if (selectedItemLoading) return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: isMobile ? 200 : '100%', flexDirection: 'column', gap: 12, opacity: 0.5 }}>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Decrypting…</p>
+        <div className={`flex flex-col items-center justify-center gap-3 text-[var(--text-secondary)] ${isMobile ? 'h-48' : 'h-full'}`}>
+            <p className="text-sm">Decrypting…</p>
         </div>
     );
 
     return (
-        <div className="animate-fade-up">
+        <div className="animate-fade-up mx-auto w-full max-w-[960px]">
             <ItemDetailHeader
                 item={selectedItem} isMobile={isMobile}
                 handleToggleFav={handleToggleFav} handleOpenEdit={handleOpenEdit}
@@ -328,9 +309,9 @@ function ItemDetailPanel({ selectedItem, selectedItemLoading, isMobile, handleTo
                 selectedItem={selectedItem} copyToClipboard={copyToClipboard}
                 hibp={hibp} setHibp={setHibp}
             />
-            <p style={{ marginTop: isMobile ? 20 : 24, fontSize: '0.72rem', color: 'var(--text-secondary)', opacity: 0.6 }}>
+            {isMobile && <p className="mt-5 text-xs text-[var(--text-secondary)]">
                 Last updated {new Date(selectedItem.updated_at).toLocaleDateString()}
-            </p>
+            </p>}
         </div>
     );
 }
@@ -340,17 +321,49 @@ function CategoryPill({ label, icon: Icon, isActive, onSelect }: Readonly<{
     isActive: boolean; onSelect: () => void;
 }>) {
     return (
-        <button type="button" onClick={onSelect} style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-            borderRadius: 20, border: '1px solid',
-            borderColor: isActive ? 'var(--accent)' : 'var(--border)',
-            background: isActive ? 'var(--accent-dim)' : 'transparent',
-            color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
-            fontSize: '0.8rem', fontFamily: 'Outfit, sans-serif',
-            cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
-        }}>
+        <button type="button" onClick={onSelect}
+            className={`flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 py-2 text-xs ${isActive ? 'border-[var(--accent)] bg-[var(--accent-dim)] text-[var(--accent)]' : 'border-[var(--border)] text-[var(--text-secondary)]'}`}>
             <Icon size={13} /> {label}
         </button>
+    );
+}
+
+function EmptyView({ title, description, icon: Icon }: Readonly<{
+    title: string;
+    description: string;
+    icon: LucideIcon;
+}>) {
+    return (
+        <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center text-[var(--text-secondary)]">
+            <div className="flex size-14 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--accent)]">
+                <Icon size={26} />
+            </div>
+            <h2 className="font-display text-2xl text-[var(--text-primary)]">{title}</h2>
+            <p className="max-w-sm text-sm">{description}</p>
+        </div>
+    );
+}
+
+function EmptyArtwork({ icon: Icon, label }: Readonly<{ icon: LucideIcon; label: string }>) {
+    return (
+        <div aria-hidden="true" className="relative mx-auto aspect-[5/4] w-full max-w-[460px]">
+            <div className="absolute inset-5 rotate-6 rounded-[28px] border border-[var(--border)]" />
+            <div className="absolute inset-5 -rotate-6 rounded-[28px] border border-[var(--border)] bg-[var(--bg-card)]" />
+            <div className="absolute inset-9 flex flex-col justify-between rounded-[24px] border border-[var(--border)] bg-[var(--bg-elevated)] p-7 shadow-2xl shadow-black/30 sm:p-9">
+                <div className="flex items-start justify-between gap-4">
+                    <div className="flex size-14 items-center justify-center rounded-2xl bg-[var(--accent-dim)] text-[var(--accent)]">
+                        <Icon size={30} strokeWidth={1.6} />
+                    </div>
+                    <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-[var(--text-secondary)]">Cipheria</span>
+                </div>
+                <div>
+                    <div className="mb-5 h-px w-full bg-[var(--border)]" />
+                    <p className="text-sm font-medium text-[var(--text-secondary)]">{label}</p>
+                    <div className="mt-3 h-2 w-2/3 rounded-full bg-[var(--border)]" />
+                    <div className="mt-2 h-2 w-1/3 rounded-full bg-[var(--border)]" />
+                </div>
+            </div>
+        </div>
     );
 }
 
@@ -451,6 +464,12 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
     }, [mobilePanel, selectedItem]);
 
     useEffect(() => {
+        if (selectedItem || searchLoading || !filteredItems.length ||
+            !window.matchMedia('(min-width: 1024px)').matches) return;
+        void handleSelectItem(filteredItems[0]);
+    }, [filteredItems, handleSelectItem, searchLoading, selectedItem]);
+
+    useEffect(() => {
         const handlePopState = (event: PopStateEvent) => {
             mobileDetailHistoryRef.current = Boolean(event.state?.cipheriaMobileDetail);
             setMobilePanel(event.state?.cipheriaMobileDetail ? 'detail' : 'list');
@@ -464,30 +483,66 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
         selectedItem, selectedItemLoading,
         handleToggleFav, handleOpenEdit, handleRestoreItem, handleDeletePermanent, deletingId, copyToClipboard, hibp, setHibp,
     };
+    const hasNoItems = !searchLoading && filteredItems.length === 0;
+    const emptyViewTitle = searchValue ? 'No matching items'
+        : isTrashView ? 'Trash is empty'
+            : isFavouritesView ? 'No favourites yet'
+                : category === 'all' ? 'Your vault is empty'
+                    : `No ${ITEM_CATEGORIES.find(({ id }) => id === category)?.label.toLowerCase() ?? 'items'} yet`;
+    const emptyViewDescription = searchValue ? 'Try a different search term.'
+        : isTrashView ? 'Deleted items will appear here.'
+            : isFavouritesView ? 'Favourite an item to find it here.'
+                : category === 'all' ? 'Items you add will appear here.'
+                    : 'Items in this category will appear here.';
+    const emptyViewIcon = searchValue ? Search
+        : isTrashView ? Trash2
+            : isFavouritesView ? Star : CATEGORY_ICONS[category] || Shield;
+    const emptyCategoryLabel = isTrashView ? 'Trash'
+        : isFavouritesView ? 'Favourites'
+            : category === 'all' ? 'All Items'
+                : ITEM_CATEGORIES.find(({ id }) => id === category)?.label ?? 'Items';
+    const desktopEmptyCopy = searchValue
+        ? { title: 'Nothing matched your search.', description: 'Try another term or clear the search to see your items.' }
+        : isTrashView
+            ? { title: 'Nothing in the trash.', description: 'Items you delete will appear here until you remove them permanently.' }
+            : isFavouritesView
+                ? { title: 'Keep favourites close.', description: 'Star an item and it will appear here for quick access.' }
+                : EMPTY_CATEGORY_COPY[category];
+    const emptyAction = searchValue
+        ? <button type="button" className="btn-ghost" onClick={() => onSearchChange('')}>Clear search</button>
+        : !isTrashView && !isFavouritesView
+            ? <button type="button" className="btn-primary" onClick={() => {
+                if (category !== 'all') setNewItem({ ...newItem, category });
+                handleOpenAddModal();
+            }}><Plus size={16} /> {EMPTY_CATEGORY_COPY[category].action}</button>
+            : undefined;
+    const desktopControls = (
+        <div className="border-b border-[var(--border)] px-4 py-5">
+            <div className="w-full max-w-[448px]">
+                <div className={`relative ${isTrashView ? '' : 'mb-3'}`}>
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
+                    <input className="input-field vault-search-input" aria-label="Search vault" placeholder="Search vault..." value={searchValue}
+                        onChange={handleSearchChange} />
+                </div>
+                {!isTrashView && <button type="button" className="btn-primary w-full" onClick={handleOpenAddModal}>
+                    <Plus size={16} /> Add Item
+                </button>}
+            </div>
+        </div>
+    );
 
     return (
-        <div style={{ display: 'flex', height: '100dvh', background: 'var(--bg)', overflow: 'hidden' }}>
+        <div className="flex h-dvh w-full overflow-hidden bg-[var(--bg)]">
             <MobileTopBar
                 mobilePanel={mobilePanel} selectedItem={selectedItem}
                 onBack={handleMobileBack} lockVault={lockVault} handleLogout={handleLogout}
                 onOpenSettings={onOpenSettings}
             />
 
-            <style>{`
-                @keyframes shimmer {
-                    0%, 100% { opacity: 0.45; }
-                    50%      { opacity: 0.85; }
-                }
-                .search-skeleton-item { animation: shimmer 1.3s ease-in-out infinite; }
-            `}</style>
-
             {/* Mobile: list panel */}
-            <div className={`mobile-list-panel${mobilePanel === 'list' ? ' is-active' : ''}`} style={{
-                position: 'fixed', inset: 0, zIndex: 10,
-                flexDirection: 'column', background: 'var(--bg)', paddingTop: 57,
-            }}>
+            <div className={`fixed inset-0 z-10 flex-col bg-[var(--bg)] pt-[57px] lg:hidden ${mobilePanel === 'list' ? 'flex' : 'hidden'}`}>
                 {/* Category pills */}
-                <div style={{ overflowX: 'auto', display: 'flex', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+                <div className="flex shrink-0 gap-2 overflow-x-auto border-b border-[var(--border)] px-4 py-3">
                     {CATEGORIES.map(({ id, label, icon }) => (
                         <CategoryPill key={id} label={label} icon={icon}
                             isActive={!isTrashView && !isFavouritesView && category === id}
@@ -499,40 +554,39 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                         isActive={isTrashView} onSelect={handleTrashPill} />
                 </div>
 
-                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8, flexShrink: 0 }}>
-                    <div style={{ position: 'relative', flex: 1 }}>
-                        <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
-                        <input className="input-field" placeholder="Search vault..." value={searchValue}
-                            onChange={handleSearchChange} style={{ paddingLeft: 36, fontSize: 'max(16px, 0.9rem)' }} />
+                <div className="flex shrink-0 gap-2 border-b border-[var(--border)] px-4 py-3">
+                    <div className="relative flex-1">
+                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
+                        <input className="input-field vault-search-input" aria-label="Search vault" placeholder="Search vault..." value={searchValue}
+                            onChange={handleSearchChange} />
                     </div>
                     {!isTrashView && <button type="button" className="btn-primary" onClick={handleOpenAddModal}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', flexShrink: 0 }}>
+                        aria-label="Add item" title="Add item">
                         <Plus size={16} />
                     </button>}
                 </div>
 
-                <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-                    <ItemList variant="mobile" items={filteredItems} loading={searchLoading} onSelect={handleSelectItemMobile} />
+                <div className="flex-1 overflow-y-auto p-2">
+                    {hasNoItems
+                        ? <EmptyView title={emptyViewTitle} description={emptyViewDescription} icon={emptyViewIcon} />
+                        : <ItemList variant="mobile" items={filteredItems} loading={searchLoading} onSelect={handleSelectItemMobile} />}
                 </div>
 
                 <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
 
-                <div style={{ borderTop: '1px solid var(--border)', padding: '12px 16px', display: 'flex', gap: 8, paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }}>
-                    <button type="button" onClick={handleExport} className="btn-ghost" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', fontSize: '0.8rem' }}>
+                <div className="flex gap-2 border-t border-[var(--border)] px-4 pt-3 pb-[calc(12px+env(safe-area-inset-bottom,0px))]">
+                    <button type="button" onClick={handleExport} className="btn-ghost flex-1 text-xs">
                         <Download size={14} /> Export
                     </button>
-                    <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', padding: '0 8px', opacity: 0.6, flex: 1, justifyContent: 'center', ...ELLIPSIS_STYLE }}>
+                    <p className="flex flex-1 items-center justify-center truncate px-2 text-xs text-[var(--text-secondary)]">
                         {user?.email}
                     </p>
                 </div>
             </div>
 
             {/* Mobile: detail panel */}
-            <div className={`mobile-detail-panel${mobilePanel === 'detail' ? ' is-active' : ''}`} style={{
-                position: 'fixed', inset: 0, zIndex: 10,
-                flexDirection: 'column', background: 'var(--bg)', paddingTop: 57, overflowY: 'auto',
-            }}>
-                <div style={{ padding: '24px 16px', flex: 1 }}>
+            <div className={`fixed inset-0 z-10 flex-col overflow-y-auto bg-[var(--bg)] pt-[57px] lg:hidden ${mobilePanel === 'detail' ? 'flex' : 'hidden'}`}>
+                <div className="flex-1 px-4 py-6 sm:px-6">
                     <ItemDetailPanel {...detailPanelProps} isMobile handleDelete={handleDelete} />
                 </div>
             </div>
@@ -546,34 +600,39 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                 onToggleTrash={onToggleTrash} isFavouritesView={isFavouritesView} isTrashView={isTrashView}
             />
 
-            <div className="desktop-list-col" style={{
-                flex: '0 1 24%',
-                minWidth: 280,
-                maxWidth: 420,
-                borderRight: '1px solid var(--border)',
-                flexDirection: 'column',
-            }}>
-                <div style={{ padding: '20px 16px', borderBottom: '1px solid var(--border)' }}>
-                    <div style={{ position: 'relative', marginBottom: 12 }}>
-                        <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
-                        <input className="input-field" placeholder="Search vault..." value={searchValue}
-                            onChange={handleSearchChange} style={{ paddingLeft: 36 }} />
+            {hasNoItems ? (
+                <div className="hidden min-w-0 flex-1 overflow-y-auto lg:block">
+                    <div className="mx-auto grid min-h-full w-full max-w-[1200px] grid-cols-2 items-center gap-10 px-8 py-12 xl:gap-16 xl:px-12">
+                        <div className="min-w-0">
+                            <p className="mb-6 text-xs font-medium uppercase tracking-[0.2em] text-[var(--accent)]">{emptyCategoryLabel} / 0 items</p>
+                            {searchValue && <div className="relative mb-8 w-full max-w-[420px]">
+                                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
+                                <input className="input-field vault-search-input" aria-label="Search vault" placeholder="Search vault..." value={searchValue}
+                                    onChange={handleSearchChange} />
+                            </div>}
+                            <h1 className="font-display text-4xl leading-tight text-[var(--text-primary)] xl:text-5xl">{desktopEmptyCopy.title}</h1>
+                            <p className="mt-5 max-w-md text-base leading-7 text-[var(--text-secondary)]">{desktopEmptyCopy.description}</p>
+                            {emptyAction && <div className="mt-8">{emptyAction}</div>}
+                        </div>
+                        <EmptyArtwork icon={emptyViewIcon} label={emptyCategoryLabel} />
                     </div>
-                    {!isTrashView && <button type="button" className="btn-primary" onClick={handleOpenAddModal}
-                        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                        <Plus size={16} /> Add Item
-                    </button>}
                 </div>
-                <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-                    <ItemList variant="desktop" items={filteredItems} loading={searchLoading}
-                        selectedId={selectedItem?.id} onSelect={handleSelectItem} />
-                </div>
-                <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
-            </div>
+            ) : (
+                <>
+                    <div className="hidden w-[320px] shrink-0 flex-col border-r border-[var(--border)] xl:w-[380px] 2xl:w-[480px] lg:flex">
+                        {desktopControls}
+                        <div className="flex-1 overflow-y-auto p-2">
+                            <ItemList variant="desktop" items={filteredItems} loading={searchLoading}
+                                selectedId={selectedItem?.id} onSelect={handleSelectItem} />
+                        </div>
+                        <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
+                    </div>
 
-            <div className="desktop-detail-col" style={{ flex: '1 1 0', minWidth: 0, overflowY: 'auto', padding: 32 }}>
-                <ItemDetailPanel {...detailPanelProps} handleDelete={handleDelete} />
-            </div>
+                    <div className="hidden min-w-0 flex-1 overflow-y-auto px-6 py-8 lg:block xl:px-10 xl:py-10">
+                        <ItemDetailPanel {...detailPanelProps} handleDelete={handleDelete} />
+                    </div>
+                </>
+            )}
 
             {showAddModal && (
                 <AddItemModal newItem={newItem} setNewItem={setNewItem} savingItem={savingItem}
