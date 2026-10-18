@@ -1,15 +1,13 @@
 'use client';
-import { Archive, Key, Settings, Shield, Globe, CreditCard, StickyNote, User, Download, Lock, LogOut, Star } from 'lucide-react';
-import { Category } from './types';
+import { Archive, Key, Settings, Shield, Download, Lock, LogOut, Star } from 'lucide-react';
+import { ITEM_CATEGORIES } from './types';
+import type { Category } from './types';
 import { useSignOut } from './hooks/useSignOut';
-import type { UserProfile, VaultItem } from '@/lib/types';
+import type { SidebarCounts, UserProfile, VaultItem } from '@/lib/types';
 
 const NAV_ITEMS = [
   { id: 'all', label: 'All Items', icon: Shield },
-  { id: 'login', label: 'Logins', icon: Globe },
-  { id: 'card', label: 'Cards', icon: CreditCard },
-  { id: 'note', label: 'Notes', icon: StickyNote },
-  { id: 'identity', label: 'Identities', icon: User },
+  ...ITEM_CATEGORIES,
 ] as const;
 
 const ELLIPSIS_STYLE = {
@@ -18,16 +16,8 @@ const ELLIPSIS_STYLE = {
 
 interface DesktopSidebarProps {
   user: Pick<UserProfile, 'email'> | null;
-  category: string;
-  sidebarCounts: {
-    all: number;
-    login: number;
-    card: number;
-    note: number;
-    identity: number;
-    favourites: number;
-    trash: number;
-  };
+  category: Category;
+  sidebarCounts: SidebarCounts;
   setCategory: (c: Category) => void;
   handleExport: () => void;
   lockVault: () => void;
@@ -48,7 +38,7 @@ export function DesktopSidebar({ user, category, sidebarCounts, setCategory, han
       minWidth: 220,
       maxWidth: 300,
       borderRight: '1px solid var(--border)',
-      display: 'flex', flexDirection: 'column',
+      flexDirection: 'column',
       padding: '20px 12px',
       background: 'var(--bg-card)', gap: 0,
     }}>
@@ -72,9 +62,9 @@ export function DesktopSidebar({ user, category, sidebarCounts, setCategory, han
       {/* Nav */}
       <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
         {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
-          const count = sidebarCounts[id as keyof typeof sidebarCounts] ?? 0;
+          const count = sidebarCounts[id];
           return (
-            <button key={id} type="button" onClick={() => setCategory(id as Category)}
+            <button key={id} type="button" onClick={() => setCategory(id)}
               className={`nav-item${category === id && !isTrashView && !isFavouritesView ? ' active' : ''}`}>
               <Icon size={15} style={{ flexShrink: 0 }} />
               {label}
