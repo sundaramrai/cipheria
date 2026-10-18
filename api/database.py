@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
-from typing import Generator
 import logging
 import os
 import re
+import uuid
+from collections.abc import Generator
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
-import uuid
 
 from dotenv import load_dotenv
 from sqlalchemy import Boolean, Column, Index, Integer, String, Text, create_engine
@@ -66,12 +66,12 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     email_verified = Column(Boolean, default=False)
     created_at = Column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
     updated_at = Column(
         TIMESTAMP(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
     # Password hint - never the actual password
     master_hint = Column(String(255), nullable=True)
@@ -95,12 +95,12 @@ class VaultItem(Base):
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
     updated_at = Column(
         TIMESTAMP(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     __table_args__ = (
@@ -119,7 +119,7 @@ class AuditLog(Base):
     ip_address = Column(String(64), nullable=True)
     user_agent = Column(String(512), nullable=True)
     created_at = Column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
 
 
@@ -131,7 +131,7 @@ class RefreshToken(Base):
     token_hash = Column(String(255), nullable=False, unique=True, index=True)
     expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
     created_at = Column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
     revoked = Column(Boolean, default=False)
 
@@ -145,12 +145,12 @@ class AuthToken(Base):
     purpose = Column(String(64), nullable=False, index=True)
     expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
     created_at = Column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
     consumed_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Session]:
     db = SessionLocal()
     try:
         yield db
