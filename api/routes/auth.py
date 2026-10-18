@@ -2,58 +2,59 @@
 routes/auth.py — Auth routes with Redis cache integration.
 """
 
-import os
-import uuid
-import secrets
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any, Optional
+import os
+import secrets
+import uuid
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, Cookie
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from jwt import InvalidTokenError
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from database import get_db, User, AuditLog, RefreshToken, VaultItem, AuthToken
+from audit import log_action
+from cache import (
+    cache_refresh_token_valid,
+    get_cached_user,
+    invalidate_all_vault,
+    invalidate_user,
+    is_token_blacklisted,
+    revoke_refresh_token_cache,
+    set_cached_user,
+)
 from crypto import (
-    hash_password,
-    verify_password,
-    generate_salt,
+    REFRESH_TOKEN_EXPIRE_DAYS,
     create_access_token,
     create_refresh_token,
     decode_token,
+    generate_salt,
+    hash_password,
     hash_refresh_token,
-    REFRESH_TOKEN_EXPIRE_DAYS,
+    verify_password,
 )
+from database import AuditLog, AuthToken, RefreshToken, User, VaultItem, get_db
+from deps import DBUser, get_current_user_from_db
+from limiter import limiter
+from mailer import build_app_url, send_email
 from schemas import (
-    RegisterRequest,
+    ChangeMasterPasswordRequest,
+    DeleteAccountRequest,
     LoginChallengeRequest,
     LoginChallengeResponse,
     LoginRequest,
+    MessageResponse,
+    RegisterRequest,
     TokenResponse,
+    UnlockedVaultResponse,
+    UpdateProfileRequest,
     UserResponse,
     VerifyEmailRequest,
     VerifyEmailResponse,
-    UpdateProfileRequest,
-    ChangeMasterPasswordRequest,
-    DeleteAccountRequest,
     VerifyMasterPasswordRequest,
-    MessageResponse,
-    UnlockedVaultResponse,
 )
-from deps import get_current_user_from_db, DBUser
-from cache import (
-    get_cached_refresh_token,
-    get_cached_user,
-    cache_refresh_token_valid,
-    revoke_refresh_token_cache,
-    is_token_blacklisted,
-    invalidate_user,
-    invalidate_all_vault,
-    set_cached_user,
-)
-from limiter import limiter, get_client_ip
-from mailer import send_email, build_app_url
 from user_cache import serialize_cached_user
 from vault_counts import get_cached_sidebar_counts_for_user
 from vault_serializers import serialize_vault_item
@@ -61,6 +62,7 @@ from vault_serializers import serialize_vault_item
 logger = logging.getLogger(__name__)
 
 INVALID_EMAIL_OR_PASSWORD = "Invalid email or password"
+INVALID_MASTER_PASSWORD = "Invalid master password"
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -92,17 +94,6 @@ def _clear_refresh_cookie(response: Response) -> None:
         httponly=True,
         secure=IS_PROD,
         samesite="none" if IS_PROD else "lax",
-    )
-
-
-def _log_action(db: Session, user_id, action: str, request: Request) -> None:
-    db.add(
-        AuditLog(
-            user_id=user_id,
-            action=action,
-            ip_address=get_client_ip(request),
-            user_agent=request.headers.get("user-agent"),
-        )
     )
 
 
@@ -205,14 +196,14 @@ def _consume_auth_token(
             AuthToken.token_hash == _hash_action_token(raw_token),
             AuthToken.purpose == purpose,
             AuthToken.consumed_at.is_(None),
-            AuthToken.expires_at > datetime.now(timezone.utc),
+            AuthToken.expires_at > datetime.now(UTC),
         )
         .first()
     )
     if not stored:
         raise HTTPException(status_code=400, detail="Invalid or expired token")
 
-    stored.consumed_at = datetime.now(timezone.utc)
+    stored.consumed_at = datetime.now(UTC)
     return stored
 
 
@@ -265,16 +256,16 @@ def register(
         RefreshToken(
             user_id=user.id,
             token_hash=token_hash,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+            expires_at=datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         )
     )
     verify_token = _issue_auth_token(
         db,
         user.id,
         "verify_email",
-        datetime.now(timezone.utc) + timedelta(hours=EMAIL_VERIFY_EXPIRE_HOURS),
+        datetime.now(UTC) + timedelta(hours=EMAIL_VERIFY_EXPIRE_HOURS),
     )
-    _log_action(db, user.id, "REGISTER", request)
+    log_action(db, user.id, "REGISTER", request)
     db.commit()
 
     _warm_caches(user, token_hash)
@@ -332,10 +323,10 @@ def login(
         RefreshToken(
             user_id=user.id,
             token_hash=token_hash,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+            expires_at=datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         )
     )
-    _log_action(db, user.id, "LOGIN", request)
+    log_action(db, user.id, "LOGIN", request)
 
     # Prune stale revoked tokens to keep the refresh_tokens table lean.
     # Done at login so cost is amortised — not on every request.
@@ -362,7 +353,7 @@ def refresh(  # NOSONAR - token rotation flow is intentionally explicit on this 
     request: Request,
     response: Response,
     db: Annotated[Session, Depends(get_db)],
-    refresh_token: Annotated[Optional[str], Cookie()] = None,
+    refresh_token: Annotated[str | None, Cookie()] = None,
 ):
     def _reject_refresh(detail: str) -> None:
         _clear_refresh_cookie(response)
@@ -392,40 +383,19 @@ def refresh(  # NOSONAR - token rotation flow is intentionally explicit on this 
         _reject_refresh("Refresh token revoked")
 
     token_hash = hash_refresh_token(refresh_token)
-    cached_rt = get_cached_refresh_token(token_hash)
-
-    if cached_rt:
-        # Cache confirms this token is valid — skip the initial DB read.
-        # We still fetch the row below to mark it revoked, but that query
-        # runs after the cache is cleared so concurrent reuse is blocked.
-        logger.debug(f"refresh token cache HIT user={user_id}")
-        stored = None  # resolved lazily during rotation
-    else:
-        logger.debug(f"refresh token cache MISS user={user_id}")
-        stored = (
-            db.query(RefreshToken)
-            .filter(
-                RefreshToken.token_hash == token_hash,
-                ~RefreshToken.revoked,
-                RefreshToken.expires_at > datetime.now(timezone.utc),
-            )
-            .first()
+    # A conditional UPDATE is the rotation gate, even when Redis has stale data.
+    revoked_count = (
+        db.query(RefreshToken)
+        .filter(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.user_id == uuid.UUID(user_id),
+            RefreshToken.revoked.is_(False),
+            RefreshToken.expires_at > datetime.now(UTC),
         )
-        if not stored:
-            _reject_refresh("Refresh token expired or revoked")
-
-    # Revocation order: DB first, then cache
-    # Persisting to DB first ensures the token is durably revoked even if the
-    # process crashes before the cache write. The reverse order would leave a
-    # permanently valid but un-rotatable token if the server dies mid-flight.
-    if stored is None:
-        stored = (
-            db.query(RefreshToken)
-            .filter(RefreshToken.token_hash == token_hash)
-            .first()
-        )
-    if stored:
-        stored.revoked = True
+        .update({RefreshToken.revoked: True}, synchronize_session=False)
+    )
+    if revoked_count != 1:
+        _reject_refresh("Refresh token expired or revoked")
 
     cached_user = get_cached_user(user_id)
     user = None
@@ -446,10 +416,10 @@ def refresh(  # NOSONAR - token rotation flow is intentionally explicit on this 
         RefreshToken(
             user_id=user_id,
             token_hash=new_hash,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+            expires_at=datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         )
     )
-    _log_action(db, user_id, "TOKEN_REFRESH", request)
+    log_action(db, user_id, "TOKEN_REFRESH", request)
     db.commit()  # old token revoked + new token persisted atomically
     # Clear old token from cache only after DB commit succeeds
     revoke_refresh_token_cache(token_hash, jti, _RT_TTL_SECONDS)
@@ -474,7 +444,7 @@ def logout(
     request: Request,
     response: Response,
     db: Annotated[Session, Depends(get_db)],
-    refresh_token: Annotated[Optional[str], Cookie()] = None,
+    refresh_token: Annotated[str | None, Cookie()] = None,
 ):
     if refresh_token:
         try:
@@ -487,25 +457,19 @@ def logout(
             if stored:
                 stored.revoked = True
 
-            _log_action(db, user_id, "LOGOUT", request)
+            log_action(db, user_id, "LOGOUT", request)
             db.commit()
 
             revoke_refresh_token_cache(token_hash, jti, _RT_TTL_SECONDS)
             invalidate_user(user_id)
             invalidate_all_vault(user_id)
             logger.info(f"LOGOUT user={user_id} — all caches purged")
-        except Exception as exc:
+        except (InvalidTokenError, SQLAlchemyError, TypeError, ValueError) as exc:
             # Malformed or expired token — still clear the cookie.
             # Log so genuine errors (DB down, Redis down) are not silent.
             logger.warning(f"LOGOUT cleanup error (non-fatal): {exc}")
 
-    response.delete_cookie(
-        key="refresh_token",
-        path=AUTH_COOKIE_PATH,
-        httponly=True,
-        secure=IS_PROD,
-        samesite="none" if IS_PROD else "lax",
-    )
+    _clear_refresh_cookie(response)
     return {"message": "Logged out"}
 
 
@@ -526,7 +490,7 @@ def verify_email(
         raise HTTPException(status_code=400, detail="Account not found")
 
     user.email_verified = True
-    _log_action(db, user.id, "EMAIL_VERIFIED", request)
+    log_action(db, user.id, "EMAIL_VERIFIED", request)
     db.commit()
 
     set_cached_user(
@@ -559,9 +523,9 @@ def resend_verification_email(
         db,
         current_user.id,
         "verify_email",
-        datetime.now(timezone.utc) + timedelta(hours=EMAIL_VERIFY_EXPIRE_HOURS),
+        datetime.now(UTC) + timedelta(hours=EMAIL_VERIFY_EXPIRE_HOURS),
     )
-    _log_action(db, current_user.id, "VERIFY_EMAIL_SENT", request)
+    log_action(db, current_user.id, "VERIFY_EMAIL_SENT", request)
     if not _send_verification_email(current_user, raw_token):
         db.rollback()
         raise HTTPException(
@@ -575,7 +539,7 @@ def resend_verification_email(
 @router.post(
     "/unlock",
     response_model=UnlockedVaultResponse,
-    responses={401: {"description": "Invalid master password"}},
+    responses={401: {"description": INVALID_MASTER_PASSWORD}},
 )
 @limiter.limit("20/minute")
 def unlock_vault(
@@ -585,7 +549,7 @@ def unlock_vault(
     current_user: DBUser,
 ):
     if not _verify_master_password(current_user, body.master_password_verifier):
-        raise HTTPException(status_code=401, detail="Invalid master password")
+        raise HTTPException(status_code=401, detail=INVALID_MASTER_PASSWORD)
 
     return _build_unlock_response(db, current_user)
 
@@ -634,7 +598,7 @@ def update_profile(
 ):
     current_user.full_name = body.full_name
     current_user.master_hint = body.master_hint
-    _log_action(db, current_user.id, "PROFILE_UPDATED", request)
+    log_action(db, current_user.id, "PROFILE_UPDATED", request)
     db.commit()
     db.refresh(current_user)
 
@@ -648,7 +612,10 @@ def update_profile(
 @router.patch(
     "/master-password",
     response_model=UserResponse,
-    responses={400: {"description": "All active vault items must be re-encrypted before changing the master password or master password payload contains an unknown item"}},
+    responses={
+        400: {"description": "All vault items must be re-encrypted with unique, known IDs"},
+        401: {"description": "Invalid current master password"},
+    },
 )
 @limiter.limit("5/minute")
 def change_master_password(
@@ -657,12 +624,18 @@ def change_master_password(
     db: Annotated[Session, Depends(get_db)],
     current_user: DBUser,
 ):
+    if not _verify_master_password(current_user, body.current_master_password_verifier):
+        raise HTTPException(status_code=401, detail=INVALID_MASTER_PASSWORD)
+
     vault_items = (
         db.query(VaultItem)
         .filter(VaultItem.user_id == current_user.id)
         .all()
     )
-    if len(vault_items) != len(body.items):
+    if (
+        len(vault_items) != len(body.items)
+        or {item.id for item in vault_items} != {update.id for update in body.items}
+    ):
         raise HTTPException(
             status_code=400,
             detail="All vault items, including items in trash, must be re-encrypted before changing the master password",
@@ -678,7 +651,7 @@ def change_master_password(
     current_user.hashed_password = hash_password(body.new_master_password_verifier)
     current_user.vault_salt = body.new_vault_salt
     current_user.master_hint = body.master_hint
-    _log_action(db, current_user.id, "MASTER_PASSWORD_CHANGED", request)
+    log_action(db, current_user.id, "MASTER_PASSWORD_CHANGED", request)
     db.commit()
     db.refresh(current_user)
 
@@ -701,10 +674,10 @@ def delete_account(
     current_user: DBUser,
 ):
     if not _verify_master_password(current_user, body.master_password_verifier):
-        raise HTTPException(status_code=401, detail="Invalid master password")
+        raise HTTPException(status_code=401, detail=INVALID_MASTER_PASSWORD)
 
     user_id = current_user.id
-    _log_action(db, user_id, "ACCOUNT_DELETED", request)
+    log_action(db, user_id, "ACCOUNT_DELETED", request)
 
     db.query(AuthToken).filter(AuthToken.user_id == user_id).delete(synchronize_session=False)
     db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete(synchronize_session=False)
