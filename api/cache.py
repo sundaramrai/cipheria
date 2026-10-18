@@ -14,9 +14,11 @@ Key families:
 import hashlib
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import redis
+from redis.exceptions import RedisError
+
 from settings import get_redis_url
 
 logger = logging.getLogger(__name__)
@@ -27,7 +29,7 @@ TTL_SIDEBAR_COUNTS = 5 * 60
 TTL_VAULT_ITEM = 10 * 60
 
 
-def _build_redis_client() -> Optional[redis.Redis]:
+def _build_redis_client() -> redis.Redis | None:
     url = get_redis_url()
     if not url:
         logger.info("Redis disabled for this environment; caching disabled.")
@@ -44,25 +46,25 @@ def _build_redis_client() -> Optional[redis.Redis]:
         client.ping()
         logger.info("Redis connected")
         return client
-    except Exception:
+    except (RedisError, ValueError, TypeError):
         logger.exception("Redis connection failed; caching disabled.")
         return None
 
 
-_redis: Optional[redis.Redis] = _build_redis_client()
+_redis: redis.Redis | None = _build_redis_client()
 
 
-def get_redis() -> Optional[redis.Redis]:
+def get_redis() -> redis.Redis | None:
     return _redis
 
 
-def _get(key: str) -> Optional[Any]:
+def _get(key: str) -> Any | None:
     if _redis is None:
         return None
     try:
         raw = _redis.get(key)
         return json.loads(raw) if raw else None
-    except Exception as exc:
+    except (RedisError, json.JSONDecodeError, TypeError, UnicodeError) as exc:
         logger.warning("Cache GET error [%s]: %s", key, exc)
         return None
 
@@ -72,7 +74,7 @@ def _set(key: str, value: Any, ttl: int) -> None:
         return
     try:
         _redis.setex(key, ttl, json.dumps(value, default=str))
-    except Exception as exc:
+    except (RedisError, ValueError, TypeError, UnicodeError) as exc:
         logger.warning("Cache SET error [%s]: %s", key, exc)
 
 
@@ -81,7 +83,7 @@ def _delete(*keys: str) -> None:
         return
     try:
         _redis.delete(*keys)
-    except Exception as exc:
+    except RedisError as exc:
         logger.warning("Cache DELETE error %s: %s", keys, exc)
 
 
@@ -96,7 +98,7 @@ def _delete_pattern(pattern: str) -> None:
                 _redis.delete(*keys)
             if cursor == 0:
                 break
-    except Exception as exc:
+    except RedisError as exc:
         logger.warning("Cache DELETE pattern error [%s]: %s", pattern, exc)
 
 
@@ -110,7 +112,7 @@ def _get_vault_list_version(user_id: str) -> int:
     try:
         raw = _redis.get(_vault_list_version_key(user_id))
         return int(raw) if raw else 1
-    except Exception as exc:
+    except (RedisError, ValueError, TypeError, UnicodeError) as exc:
         logger.warning("Cache version read error [vault:list:%s]: %s", user_id, exc)
         return 1
 
@@ -120,14 +122,14 @@ def _bump_vault_list_version(user_id: str) -> None:
         return
     try:
         _redis.incr(_vault_list_version_key(user_id))
-    except Exception as exc:
+    except RedisError as exc:
         logger.warning("Cache version bump error [vault:list:%s]: %s", user_id, exc)
 
 
 def _vault_list_key(
     user_id: str,
-    category: Optional[str],
-    search: Optional[str],
+    category: str | None,
+    search: str | None,
     favourites_only: bool,
     deleted_only: bool,
     page: int,
@@ -144,7 +146,7 @@ def _sidebar_counts_key(user_id: str) -> str:
     return f"vault:sidebar:{user_id}:{version}"
 
 
-def get_cached_user(user_id: str) -> Optional[dict]:
+def get_cached_user(user_id: str) -> dict | None:
     return _get(f"user:{user_id}")
 
 
@@ -159,21 +161,21 @@ def invalidate_user(user_id: str) -> None:
 
 def get_cached_vault_list(
     user_id: str,
-    category: Optional[str],
-    search: Optional[str],
+    category: str | None,
+    search: str | None,
     favourites_only: bool,
     deleted_only: bool,
     page: int,
     page_size: int,
-) -> Optional[dict]:
+) -> dict | None:
     key = _vault_list_key(user_id, category, search, favourites_only, deleted_only, page, page_size)
     return _get(key)
 
 
 def set_cached_vault_list(
     user_id: str,
-    category: Optional[str],
-    search: Optional[str],
+    category: str | None,
+    search: str | None,
     favourites_only: bool,
     deleted_only: bool,
     page: int,
@@ -184,7 +186,7 @@ def set_cached_vault_list(
     _set(key, data, TTL_VAULT_LIST)
 
 
-def get_cached_sidebar_counts(user_id: str) -> Optional[dict]:
+def get_cached_sidebar_counts(user_id: str) -> dict | None:
     return _get(_sidebar_counts_key(user_id))
 
 
@@ -196,7 +198,7 @@ def invalidate_vault_list(user_id: str) -> None:
     _bump_vault_list_version(user_id)
 
 
-def get_cached_vault_item(user_id: str, item_id: str) -> Optional[dict]:
+def get_cached_vault_item(user_id: str, item_id: str) -> dict | None:
     return _get(f"vault:item:{user_id}:{item_id}")
 
 
@@ -217,7 +219,7 @@ def cache_refresh_token_valid(token_hash: str, user_id: str, ttl_seconds: int) -
     _set(f"rt:valid:{token_hash}", {"user_id": user_id}, ttl_seconds)
 
 
-def get_cached_refresh_token(token_hash: str) -> Optional[dict]:
+def get_cached_refresh_token(token_hash: str) -> dict | None:
     return _get(f"rt:valid:{token_hash}")
 
 
@@ -237,5 +239,5 @@ def cache_ping() -> bool:
         return False
     try:
         return bool(_redis.ping())
-    except Exception:
+    except RedisError:
         return False
