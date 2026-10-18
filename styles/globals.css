@@ -243,6 +243,29 @@ h4 {
   display: block;
 }
 
+.detail-field-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.detail-field-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+@media (min-width: 1600px) {
+  .desktop-detail-col .detail-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail-field-wide {
+    grid-column: 1 / -1;
+  }
+}
+
 .mobile-list-panel,
 .mobile-detail-panel {
   display: none;
