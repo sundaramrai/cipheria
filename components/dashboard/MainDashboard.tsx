@@ -1,37 +1,26 @@
 'use client';
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Fragment, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import Image from 'next/image';
-import { RotateCcw, Search, Plus, Shield, Globe, CreditCard, StickyNote, User, Trash2, Download, Star, Edit2, ChevronRight } from 'lucide-react';
+import { RotateCcw, Search, Plus, Shield, Globe, Trash2, Download, Star, Edit2, ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { checkHIBP } from '@/lib/crypto';
-import { CATEGORY_ICONS } from './types';
+import { CATEGORY_ICONS, ITEM_CATEGORIES } from './types';
 import { DesktopSidebar, MobileTopBar } from './Sidebar';
 import { Pagination } from './Pagination';
 import { Field, HibpCheck } from './Field';
-import { AddItemModal, EditItemModal } from './ItemModal';
+import { AddItemModal, EditItemModal, ITEM_FIELDS } from './ItemModal';
 import type { DecryptedPayload, SidebarCounts, UserProfile, VaultItem } from '@/lib/types';
 import type { Category, ItemForm } from './types';
 
 const CATEGORIES = [
     { id: 'all', label: 'All', icon: Shield },
-    { id: 'login', label: 'Logins', icon: Globe },
-    { id: 'card', label: 'Cards', icon: CreditCard },
-    { id: 'note', label: 'Notes', icon: StickyNote },
-    { id: 'identity', label: 'Identities', icon: User },
+    ...ITEM_CATEGORIES,
 ] as const;
 
 const ELLIPSIS_STYLE = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as const;
 const passthroughImageLoader = ({ src }: { src: string }) => src;
 type HibpState = { checking: boolean; count: number | null };
 type MaybePromiseVoid = void | Promise<void>;
-type PasswordGeneratorOptions = {
-    length: number;
-    uppercase: boolean;
-    lowercase: boolean;
-    numbers: boolean;
-    symbols: boolean;
-};
-
 function SearchSkeleton({ iconSize = 36 }: Readonly<{ iconSize?: number }>) {
     return (
         <>
@@ -54,7 +43,6 @@ function SearchSkeleton({ iconSize = 36 }: Readonly<{ iconSize?: number }>) {
 
 function FaviconImage({ src, size }: Readonly<{ src: string; size: number }>) {
     const [failed, setFailed] = useState(false);
-    const handleError = useCallback(() => setFailed(true), []);
 
     if (failed) return null;
 
@@ -66,7 +54,7 @@ function FaviconImage({ src, size }: Readonly<{ src: string; size: number }>) {
             height={size}
             unoptimized
             loader={passthroughImageLoader}
-            onError={handleError}
+            onError={() => setFailed(true)}
         />
     );
 }
@@ -91,9 +79,8 @@ function ItemButton({ item, isSelected, isMobile, iconSize, fontSize, padding, o
     iconSize: number; fontSize: string; padding: string;
     onSelect: (item: VaultItem) => void;
 }>) {
-    const handleClick = useCallback(() => onSelect(item), [onSelect, item]);
     return (
-        <button type="button" onClick={handleClick} style={{
+        <button type="button" onClick={() => onSelect(item)} style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
             borderRadius: 10, border: 'none', cursor: 'pointer', marginBottom: 2,
             background: isSelected ? 'var(--accent-dim)' : 'transparent',
@@ -165,21 +152,17 @@ function FieldRows({ d, copy, hibp, onCheckHibp }: Readonly<{
 }>) {
     return (
         <>
-            {d?.url && <Field label="URL" value={d.url} onCopy={copy(d.url, 'URL')} />}
-            {d?.username && <Field label="Username / Email" value={d.username} onCopy={copy(d.username, 'Username')} />}
-            {d?.password && <>
-                <Field label="Password" value={d.password} secret onCopy={copy(d.password, 'Password')} />
-                <HibpCheck hibp={hibp} onCheck={onCheckHibp} />
-            </>}
-            {d?.cardNumber && <Field label="Card Number" value={d.cardNumber} secret onCopy={copy(d.cardNumber, 'Card number')} />}
-            {d?.cardHolder && <Field label="Cardholder Name" value={d.cardHolder} onCopy={copy(d.cardHolder, 'Cardholder')} />}
-            {d?.expiry && <Field label="Expiry" value={d.expiry} onCopy={copy(d.expiry, 'Expiry')} />}
-            {d?.cvv && <Field label="CVV" value={d.cvv} secret onCopy={copy(d.cvv, 'CVV')} />}
-            {d?.firstName && <Field label="First Name" value={d.firstName} onCopy={copy(d.firstName, 'First name')} />}
-            {d?.lastName && <Field label="Last Name" value={d.lastName} onCopy={copy(d.lastName, 'Last name')} />}
-            {d?.phone && <Field label="Phone" value={d.phone} onCopy={copy(d.phone, 'Phone')} />}
-            {d?.address && <Field label="Address" value={d.address} multiline />}
-            {d?.notes && <Field label="Notes" value={d.notes} multiline />}
+            {(Object.keys(ITEM_FIELDS) as (keyof DecryptedPayload)[]).map((name) => {
+                const value = d[name];
+                if (!value) return null;
+                const definition: { label: string; copyLabel?: string; secret?: boolean; multiline?: boolean } = ITEM_FIELDS[name];
+                return <Fragment key={name}>
+                    <Field label={definition.label} value={value} secret={definition.secret}
+                        multiline={definition.multiline}
+                        onCopy={definition.copyLabel ? copy(value, definition.copyLabel) : undefined} />
+                    {name === 'password' && <HibpCheck hibp={hibp} onCheck={onCheckHibp} />}
+                </Fragment>;
+            })}
         </>
     );
 }
@@ -360,9 +343,8 @@ function CategoryPill({ label, icon: Icon, isActive, onSelect }: Readonly<{
     label: string; icon: LucideIcon;
     isActive: boolean; onSelect: () => void;
 }>) {
-    const handleClick = useCallback(() => onSelect(), [onSelect]);
     return (
-        <button type="button" onClick={handleClick} style={{
+        <button type="button" onClick={onSelect} style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px',
             borderRadius: 20, border: '1px solid',
             borderColor: isActive ? 'var(--accent)' : 'var(--border)',
@@ -390,7 +372,6 @@ interface MainDashboardProps {
     isTrashView: boolean;
     lockVault: () => void;
     handleLogout: () => Promise<void>;
-    vaultItems: VaultItem[];
     sidebarCounts: SidebarCounts;
     selectedItem: VaultItem | null;
     handleSelectItem: (item: VaultItem) => MaybePromiseVoid;
@@ -409,7 +390,6 @@ interface MainDashboardProps {
     newItem: ItemForm;
     setNewItem: (form: ItemForm) => void;
     savingItem: boolean;
-    genOptions: PasswordGeneratorOptions;
     handleAddItem: (e: React.SyntheticEvent) => MaybePromiseVoid;
     showEditModal: boolean;
     setShowEditModal: (value: boolean) => void;
@@ -421,7 +401,6 @@ interface MainDashboardProps {
     page: number;
     totalPages: number;
     onPageChange: (page: number) => MaybePromiseVoid;
-    isSearchActive: boolean;
     searchLoading: boolean;
 }
 
@@ -431,23 +410,13 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
         onOpenSettings, onToggleFavourites, onToggleTrash, isFavouritesView, isTrashView,
         sidebarCounts, setShowAddModal, setCategory, selectedItem, handleSelectItem, selectedItemLoading,
         handleToggleFav, handleOpenEdit, handleDelete, handleRestoreItem, handleDeletePermanent, deletingId, copyToClipboard,
-        hibp, setHibp, showAddModal, newItem, setNewItem, savingItem, genOptions, handleAddItem,
+        hibp, setHibp, showAddModal, newItem, setNewItem, savingItem, handleAddItem,
         showEditModal, setShowEditModal, editForm, setEditForm, updatingItem, handleEditItem,
-        filteredItems, page, totalPages, onPageChange, isSearchActive, searchLoading,
+        filteredItems, page, totalPages, onPageChange, searchLoading,
     } = props;
 
     const [mobilePanel, setMobilePanel] = useState<'list' | 'detail'>('list');
     const mobileDetailHistoryRef = useRef(false);
-    const categoryPills = useMemo(
-        () => CATEGORIES.map(categoryOption => ({
-            ...categoryOption,
-            onSelect: () => {
-                void setCategory(categoryOption.id);
-            },
-        })),
-        [setCategory],
-    );
-
     const handleSelectItemMobile = useCallback((item: VaultItem) => {
         void handleSelectItem(item);
         // The detail view is a client-side panel rather than a route. Add a
@@ -509,15 +478,6 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
             />
 
             <style>{`
-                @media (max-width: 768px) {
-                    .desktop-sidebar, .desktop-list-col, .desktop-detail-col { display: none !important; }
-                    .mobile-topbar { display: flex !important; }
-                }
-                @media (min-width: 769px) {
-                    .mobile-topbar, .mobile-list-panel, .mobile-detail-panel { display: none !important; }
-                    .desktop-sidebar { display: flex !important; }
-                    .desktop-list-col, .desktop-detail-col { display: block !important; }
-                }
                 @keyframes shimmer {
                     0%, 100% { opacity: 0.45; }
                     50%      { opacity: 0.85; }
@@ -526,16 +486,16 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
             `}</style>
 
             {/* Mobile: list panel */}
-            <div className="mobile-list-panel" style={{
-                display: mobilePanel === 'list' ? 'flex' : 'none',
+            <div className={`mobile-list-panel${mobilePanel === 'list' ? ' is-active' : ''}`} style={{
                 position: 'fixed', inset: 0, zIndex: 10,
                 flexDirection: 'column', background: 'var(--bg)', paddingTop: 57,
             }}>
                 {/* Category pills */}
                 <div style={{ overflowX: 'auto', display: 'flex', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-                    {categoryPills.map(({ id, label, icon, onSelect }) => (
+                    {CATEGORIES.map(({ id, label, icon }) => (
                         <CategoryPill key={id} label={label} icon={icon}
-                            isActive={!isTrashView && !isFavouritesView && category === id} onSelect={onSelect} />
+                            isActive={!isTrashView && !isFavouritesView && category === id}
+                            onSelect={() => { void setCategory(id); }} />
                     ))}
                     <CategoryPill label="Favourites" icon={Star}
                         isActive={isFavouritesView} onSelect={handleFavouritesPill} />
@@ -559,7 +519,7 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                     <ItemList variant="mobile" items={filteredItems} loading={searchLoading} onSelect={handleSelectItemMobile} />
                 </div>
 
-                {!isSearchActive && <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />}
+                <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
 
                 <div style={{ borderTop: '1px solid var(--border)', padding: '12px 16px', display: 'flex', gap: 8, paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }}>
                     <button type="button" onClick={handleExport} className="btn-ghost" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', fontSize: '0.8rem' }}>
@@ -572,8 +532,7 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
             </div>
 
             {/* Mobile: detail panel */}
-            <div className="mobile-detail-panel" style={{
-                display: mobilePanel === 'detail' ? 'flex' : 'none',
+            <div className={`mobile-detail-panel${mobilePanel === 'detail' ? ' is-active' : ''}`} style={{
                 position: 'fixed', inset: 0, zIndex: 10,
                 flexDirection: 'column', background: 'var(--bg)', paddingTop: 57, overflowY: 'auto',
             }}>
@@ -596,7 +555,6 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                 minWidth: 280,
                 maxWidth: 420,
                 borderRight: '1px solid var(--border)',
-                display: 'flex',
                 flexDirection: 'column',
             }}>
                 <div style={{ padding: '20px 16px', borderBottom: '1px solid var(--border)' }}>
@@ -614,7 +572,7 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                     <ItemList variant="desktop" items={filteredItems} loading={searchLoading}
                         selectedId={selectedItem?.id} onSelect={handleSelectItem} />
                 </div>
-                {!isSearchActive && <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />}
+                <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
             </div>
 
             <div className="desktop-detail-col" style={{ flex: '1 1 0', minWidth: 0, overflowY: 'auto', padding: 32 }}>
@@ -623,11 +581,11 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
 
             {showAddModal && (
                 <AddItemModal newItem={newItem} setNewItem={setNewItem} savingItem={savingItem}
-                    genOptions={genOptions} onSubmit={handleAddItem} onClose={handleAddClose} />
+                    onSubmit={handleAddItem} onClose={handleAddClose} />
             )}
             {showEditModal && editForm && (
                 <EditItemModal editForm={editForm} setEditForm={setEditForm} updatingItem={updatingItem}
-                    genOptions={genOptions} onSubmit={handleEditItem} onClose={handleEditClose} />
+                    onSubmit={handleEditItem} onClose={handleEditClose} />
             )}
         </div>
     );
