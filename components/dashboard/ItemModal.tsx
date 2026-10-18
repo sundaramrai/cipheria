@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useId, useRef } from 'react';
 import { Plus, Edit2, X, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { generatePassword, passwordStrength } from '@/lib/crypto';
 import type { DecryptedPayload } from '@/lib/types';
@@ -34,8 +34,8 @@ function FieldLabel({ htmlFor, children }: Readonly<{ htmlFor: string; children:
   return (
     <label htmlFor={htmlFor} style={{
       display: 'flex', alignItems: 'center', gap: 5,
-      fontSize: '0.68rem', fontWeight: 600,
-      letterSpacing: '0.09em', textTransform: 'uppercase',
+      fontSize: '0.8rem', fontWeight: 600,
+      letterSpacing: '0.05em', textTransform: 'uppercase',
       color: 'var(--text-secondary)', marginBottom: 7,
     }}>
       {children}
@@ -50,7 +50,7 @@ function CategoryPicker({ value, onChange }: Readonly<{ value: ItemForm['categor
       {ITEM_CATEGORIES.map(({ id, pickerLabel, icon: Icon }) => {
         const active = value === id;
         return (
-          <button key={id} type="button" onClick={() => onChange(id)} style={{
+          <button key={id} type="button" aria-pressed={active} onClick={() => onChange(id)} style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '6px 13px', borderRadius: 100,
             border: `1px solid ${active ? 'var(--accent-border-focus)' : 'var(--border)'}`,
@@ -70,38 +70,49 @@ function CategoryPicker({ value, onChange }: Readonly<{ value: ItemForm['categor
 }
 
 /* Modal shell */
-export function Modal({ children, onClose, title, icon }: Readonly<{
+export function Modal({ children, onClose, title, icon, closeDisabled = false }: Readonly<{
   children: React.ReactNode;
   onClose: () => void;
   title: string;
   icon?: React.ReactNode;
+  closeDisabled?: boolean;
 }>) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const closeDisabledRef = useRef(closeDisabled);
+  const titleId = useId();
+
+  useEffect(() => { closeDisabledRef.current = closeDisabled; }, [closeDisabled]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    if (!dialog.open) dialog.show();
-    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    const handleBackdropClick = (e: MouseEvent) => { if (e.target === dialog) onClose(); };
-    document.addEventListener('keydown', handleKeyDown);
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!dialog.open) dialog.showModal();
+    titleRef.current?.focus();
+    const handleCancel = (e: Event) => { e.preventDefault(); if (!closeDisabledRef.current) onClose(); };
+    const handleBackdropClick = (e: MouseEvent) => { if (e.target === dialog && !closeDisabledRef.current) onClose(); };
+    dialog.addEventListener('cancel', handleCancel);
     dialog.addEventListener('click', handleBackdropClick);
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
+      dialog.removeEventListener('cancel', handleCancel);
       dialog.removeEventListener('click', handleBackdropClick);
+      if (dialog.open) dialog.close();
+      if (previousFocus?.isConnected) previousFocus.focus();
     };
   }, [onClose]);
 
   return (
-    <dialog ref={dialogRef} style={{
+    <dialog ref={dialogRef} aria-labelledby={titleId} className="modal-dialog" style={{
       position: 'fixed', inset: 0, margin: 0,
       width: '100%', height: '100%', maxWidth: '100%', maxHeight: '100%',
       background: 'var(--modal-backdrop)',
       backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
-      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+      alignItems: 'flex-end', justifyContent: 'center',
       zIndex: 100, padding: 0, border: 'none',
     }}>
       <style>{`
+                .modal-dialog[open] { display: flex; }
                 @media (min-width: 600px) {
                     .modal-dialog { align-items: center !important; padding: 24px !important; }
                     .modal-sheet  { border-radius: var(--radius-xl) !important; margin-bottom: 0 !important; }
@@ -138,11 +149,11 @@ export function Modal({ children, onClose, title, icon }: Readonly<{
                 {icon}
               </div>
             )}
-            <h3 className="font-display" style={{ fontSize: '1.35rem', color: 'var(--text-primary)', lineHeight: 1 }}>
+            <h3 id={titleId} ref={titleRef} tabIndex={-1} className="font-display" style={{ fontSize: '1.35rem', color: 'var(--text-primary)', lineHeight: 1 }}>
               {title}
             </h3>
           </div>
-          <button type="button" onClick={onClose} className="btn-icon" style={{ borderRadius: 8 }}>
+          <button type="button" onClick={onClose} className="btn-icon" aria-label="Close dialog" disabled={closeDisabled} style={{ borderRadius: 8 }}>
             <X size={14} />
           </button>
         </div>
@@ -294,10 +305,10 @@ function ItemFormBody({ form, setForm, submitLabel, submitting, onClose }: Reado
           value={form.name} onChange={field('name')} />
       </div>
 
-      <div>
-        <FieldLabel htmlFor="form-category">Category</FieldLabel>
+      <fieldset className="m-0 min-w-0 border-0 p-0">
+        <legend className="mb-2 text-[13px] font-semibold uppercase tracking-[0.05em] text-[var(--text-secondary)]">Category</legend>
         <CategoryPicker value={form.category} onChange={handleCategoryChange} />
-      </div>
+      </fieldset>
 
       <div className="hairline" />
 
