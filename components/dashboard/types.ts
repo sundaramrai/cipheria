@@ -1,26 +1,16 @@
-import type { LucideIcon } from 'lucide-react';
 import { Globe, CreditCard, StickyNote, User } from 'lucide-react';
-export type { VaultItem, DecryptedPayload } from '@/lib/types';
+export const ITEM_CATEGORIES = [
+    { id: 'login', label: 'Logins', pickerLabel: 'Login', icon: Globe },
+    { id: 'card', label: 'Cards', pickerLabel: 'Card', icon: CreditCard },
+    { id: 'note', label: 'Notes', pickerLabel: 'Note', icon: StickyNote },
+    { id: 'identity', label: 'Identities', pickerLabel: 'Identity', icon: User },
+] as const;
+export type Category = 'all' | typeof ITEM_CATEGORIES[number]['id'];
 
-export type Category = 'all' | 'login' | 'card' | 'note' | 'identity';
-
-export const CATEGORY_ICONS: Record<string, LucideIcon> = {
-    login: Globe,
-    card: CreditCard,
-    note: StickyNote,
-    identity: User,
-};
+export const CATEGORY_ICONS = Object.fromEntries(ITEM_CATEGORIES.map(({ id, icon }) => [id, icon]));
 
 /** Auto-lock after 5 minutes of inactivity */
 export const IDLE_MS = 5 * 60 * 1000;
-
-export const genOptions = {
-    length: 20,
-    uppercase: true,
-    lowercase: true,
-    numbers: true,
-    symbols: true,
-} as const;
 
 export type ItemForm = {
     name: string;
