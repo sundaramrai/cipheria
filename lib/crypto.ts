@@ -145,7 +145,8 @@ const _hibpCache = new Map<string, number>();
 
 export async function checkHIBP(password: string): Promise<number> {
   const encoded = new TextEncoder().encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-1', encoded);
+  // HIBP's range API requires SHA-1; this is only a lookup fingerprint, not a password verifier.
+  const hashBuffer = await crypto.subtle.digest('SHA-1', encoded); // NOSONAR
   const hashHex = Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
