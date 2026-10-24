@@ -1,11 +1,3 @@
-/**
- * errors.ts - Centralised error-message helpers.
- *
- * Import these wherever you need to turn an API / crypto error into a
- * human-readable string. Keeping them here means the messages stay
- * consistent across pages and hooks without being copy-pasted.
- */
-
 type ApiErrorLike = {
     message?: string;
     response?: {
