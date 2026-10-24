@@ -1,15 +1,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field
 
 HEX_64_REGEX = "^[0-9a-fA-F]{64}$"
-
-
-def _validate_favicon_url(v: str | None) -> str | None:
-    if v is not None and not v.startswith("https://"):
-        raise ValueError("favicon_url must be a valid HTTPS URL")
-    return v
 
 
 # Auth
@@ -100,26 +94,14 @@ class VaultItemCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     category: str = Field(default="login", pattern="^(login|card|note|identity)$")
     encrypted_data: str = Field(..., min_length=1, max_length=100_000)
-    favicon_url: str | None = Field(None, max_length=512)
     is_favourite: bool = False
-
-    @field_validator("favicon_url")
-    @classmethod
-    def validate_favicon_url(cls, v: str | None) -> str | None:
-        return _validate_favicon_url(v)
 
 
 class VaultItemUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     category: str | None = Field(None, pattern="^(login|card|note|identity)$")
     encrypted_data: str | None = Field(None, min_length=1, max_length=100_000)
-    favicon_url: str | None = Field(None, max_length=512)
     is_favourite: bool | None = None
-
-    @field_validator("favicon_url")
-    @classmethod
-    def validate_favicon_url(cls, v: str | None) -> str | None:
-        return _validate_favicon_url(v)
 
 
 class VaultItemSummary(BaseModel):
@@ -127,7 +109,6 @@ class VaultItemSummary(BaseModel):
     id: UUID
     name: str
     category: str
-    favicon_url: str | None = None
     is_favourite: bool
     is_deleted: bool = False
     deleted_at: datetime | None = None
@@ -138,21 +119,9 @@ class VaultItemSummary(BaseModel):
         from_attributes = True
 
 
-class VaultItemResponse(BaseModel):
+class VaultItemResponse(VaultItemSummary):
     # Full response including encrypted_data, used by create/update/detail
-    id: UUID
-    name: str
-    category: str
     encrypted_data: str
-    favicon_url: str | None = None
-    is_favourite: bool
-    is_deleted: bool = False
-    deleted_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class VaultSidebarCountsResponse(BaseModel):
@@ -166,7 +135,7 @@ class VaultSidebarCountsResponse(BaseModel):
 
 
 class PaginatedVaultResponse(BaseModel):
-    items: list[VaultItemSummary]
+    items: list[VaultItemResponse | VaultItemSummary]
     total: int
     page: int
     page_size: int
@@ -174,10 +143,6 @@ class PaginatedVaultResponse(BaseModel):
     sidebar_counts: VaultSidebarCountsResponse | None = None
 
 
-class UnlockedVaultResponse(BaseModel):
+class UnlockedVaultResponse(PaginatedVaultResponse):
     items: list[VaultItemResponse]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
     sidebar_counts: VaultSidebarCountsResponse
