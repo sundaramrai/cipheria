@@ -1,6 +1,15 @@
 'use client';
 import Link from 'next/link';
+import { Analytics } from '@vercel/analytics/next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import { Shield, Lock, Key, ArrowRight, RefreshCw, Download, EyeOff, TimerReset } from 'lucide-react';
+
+// The scripts can survive client navigation; filter every event, including vitals.
+function publicPageEvent<T extends { url: string }>(event: T): T | null {
+  const url = new URL(event.url);
+  return url.pathname === '/' && globalThis.location.pathname === '/'
+    ? { ...event, url: url.origin + url.pathname } : null;
+}
 
 export default function Page() {
   return (
@@ -63,18 +72,18 @@ export default function Page() {
         <div className="animate-fade-up" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'var(--accent-dim)', border: '1px solid var(--accent-border-strong)', borderRadius: 100, padding: '5px 14px', marginBottom: 'clamp(20px, 5vw, 28px)' }}>
           <Shield size={11} color="var(--accent)" />
           <span style={{ fontSize: '0.7rem', color: 'var(--accent)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500 }}>
-            Zero-knowledge encryption
+            Browser-encrypted vault contents
           </span>
         </div>
 
         <h1 className="font-display animate-fade-up" style={{ fontSize: 'clamp(2.8rem, 12vw, 6.5rem)', lineHeight: 1.05, animationDelay: '80ms', maxWidth: 760, marginBottom: 'clamp(18px, 4vw, 24px)' }}>
           <span className="text-gradient">Your secrets,</span>
           <br />
-          <span style={{ color: 'var(--text-primary)', fontStyle: 'italic', opacity: 0.95 }}>forever yours.</span>
+          <span style={{ color: 'var(--text-primary)', fontStyle: 'italic', opacity: 0.95 }}>encrypted locally.</span>
         </h1>
 
         <p className="animate-fade-up" style={{ fontSize: 'clamp(0.9rem, 2.2vw, 1.05rem)', color: 'var(--text-secondary)', maxWidth: 440, lineHeight: 1.8, marginBottom: 'clamp(32px, 8vw, 52px)', animationDelay: '160ms' }}>
-          Cipheria encrypts everything client-side before it ever leaves your device. Not even we can read your passwords.
+          Cipheria encrypts passwords and item contents in your browser. Item names, categories, favourites and timestamps remain visible to the server.
         </p>
 
         <div className="animate-fade-up hero-ctas" style={{ display: 'flex', gap: 10, animationDelay: '240ms' }}>
@@ -97,18 +106,18 @@ export default function Page() {
               Why Cipheria
             </p>
             <h2 className="font-display" style={{ fontSize: 'clamp(1.7rem, 5vw, 2.6rem)', color: 'var(--text-primary)', lineHeight: 1.1 }}>
-              Built for the <span className="text-gradient">paranoid</span>
+              Inside your <span className="text-gradient">Cipheria vault</span>
             </h2>
           </div>
 
           <div className="features-grid">
             {[
-              { icon: Shield, title: 'Zero-Knowledge Vault', desc: 'Secrets are encrypted in the browser before they reach the API, so the server only stores ciphertext.' },
+              { icon: Shield, title: 'Encrypted Vault Contents', desc: 'Passwords, notes and other item contents are encrypted locally. Item names and organisational metadata are stored separately.' },
               { icon: Lock, title: 'Single Master Password', desc: 'One master password unlocks your vault and derives your encryption key locally on your device.' },
               { icon: EyeOff, title: 'Breach Check', desc: 'Check saved passwords against Have I Been Pwned without ever sending the full password to the service.' },
-              { icon: RefreshCw, title: 'Seamless Session Rotation', desc: 'Short-lived access tokens and rotating refresh cookies keep sessions smooth without exposing tokens to storage.' },
-              { icon: TimerReset, title: 'Idle Auto-Lock', desc: 'The vault can lock itself after inactivity so your encryption key does not sit exposed in memory longer than needed.' },
-              { icon: Download, title: 'Encrypted Export', desc: 'Export your vault as JSON whenever you want, keeping your data portable and under your control.' },
+              { icon: RefreshCw, title: 'Session Controls', desc: 'Sign out other browsers from Settings. Changing your master password also signs out your other sessions.' },
+              { icon: TimerReset, title: 'Idle Auto-Lock', desc: 'After five minutes without activity, your vault locks. Enter your master password to open it again.' },
+              { icon: Download, title: 'Encrypted Export', desc: 'Download JSON containing encrypted item contents and readable metadata. Keep the master password used for that export.' },
             ].map(({ icon: Icon, title, desc }) => (
               <div key={title} className="glass glass-hover" style={{ borderRadius: 'var(--radius-lg)', padding: 'clamp(18px, 3vw, 26px)' }}>
                 <div className="feature-card-inner" style={{ display: 'flex', flexDirection: 'row', gap: 14, alignItems: 'flex-start' }}>
@@ -135,8 +144,10 @@ export default function Page() {
           <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Cipheria</span>
         </div>
         <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>·</span>
-        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>© {new Intl.DateTimeFormat('en-US', { year: 'numeric' }).format(new Date())} · Open source · No ads · No tracking</span>
+        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>© {new Intl.DateTimeFormat('en-US', { year: 'numeric' }).format(new Date())} · Open source · No ads · Public-page analytics only; auth and vault pages excluded</span>
       </footer>
+      <Analytics beforeSend={publicPageEvent} />
+      <SpeedInsights beforeSend={publicPageEvent} />
     </main>
   );
 }
