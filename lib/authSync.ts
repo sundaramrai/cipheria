@@ -44,11 +44,12 @@ function createEvent(type: AuthSyncEvent['type'], user?: UserProfile): AuthSyncE
   };
 }
 
-export function emitAuthEvent(type: AuthSyncEvent['type'], user?: UserProfile) {
+export function emitAuthEvent(type: AuthSyncEvent['type'], user?: UserProfile, notifyCurrentTab = false) {
   if (globalThis.window === undefined) return;
 
   const event = createEvent(type, user);
   const payload = JSON.stringify(event);
+  if (notifyCurrentTab) globalThis.window.dispatchEvent(new CustomEvent(AUTH_SYNC_CHANNEL, { detail: event }));
 
   try {
     globalThis.window.localStorage.setItem(AUTH_SYNC_STORAGE_KEY, payload);
@@ -85,6 +86,8 @@ export function subscribeToAuthEvents(onEvent: (event: AuthSyncEvent) => void) {
   };
 
   globalThis.window.addEventListener('storage', handleStorage);
+  const handleLocal = (event: Event) => onEvent((event as CustomEvent<AuthSyncEvent>).detail);
+  globalThis.window.addEventListener(AUTH_SYNC_CHANNEL, handleLocal);
 
   if (typeof BroadcastChannel !== 'undefined') {
     channel = new BroadcastChannel(AUTH_SYNC_CHANNEL);
@@ -95,6 +98,7 @@ export function subscribeToAuthEvents(onEvent: (event: AuthSyncEvent) => void) {
 
   return () => {
     globalThis.window.removeEventListener('storage', handleStorage);
+    globalThis.window.removeEventListener(AUTH_SYNC_CHANNEL, handleLocal);
     channel?.close();
   };
 }
