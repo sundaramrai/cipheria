@@ -17,12 +17,8 @@ from sqlalchemy.orm import Session
 
 from audit import log_action
 from cache import (
-    cache_refresh_token_valid,
-    get_cached_user,
     invalidate_all_vault,
     invalidate_user,
-    is_token_blacklisted,
-    revoke_refresh_token_cache,
     set_cached_user,
 )
 from crypto import (
@@ -36,7 +32,7 @@ from crypto import (
     verify_password,
 )
 from database import AuditLog, AuthToken, RefreshToken, User, VaultItem, get_db
-from deps import DBUser, get_current_user_from_db
+from deps import CurrentSubject, DBUser, get_current_user_from_db
 from limiter import limiter
 from mailer import build_app_url, send_email
 from schemas import (
@@ -57,7 +53,6 @@ from schemas import (
 )
 from user_cache import serialize_cached_user
 from vault_counts import get_cached_sidebar_counts_for_user
-from vault_serializers import serialize_vault_item
 
 logger = logging.getLogger(__name__)
 
@@ -97,14 +92,13 @@ def _clear_refresh_cookie(response: Response) -> None:
     )
 
 
-def _warm_caches(user: User, token_hash: str) -> None:
-    """Prime user profile, vault salt, and refresh token validity after auth."""
+def _warm_caches(user: User) -> None:
+    """Prime the cached user profile and vault salt after auth."""
     user_id = str(user.id)
     set_cached_user(
         user_id,
         serialize_cached_user(user),
     )
-    cache_refresh_token_valid(token_hash, user_id, _RT_TTL_SECONDS)
 
 
 def _prune_revoked_tokens(db: Session, user_id) -> None:
@@ -123,6 +117,28 @@ def _hash_action_token(token: str) -> str:
 
 def _verify_master_password(user: User, verifier: str) -> bool:
     return bool(user.hashed_password and verify_password(verifier, user.hashed_password))
+
+
+def _start_session(db: Session, user: User) -> tuple[str, str]:
+    session_id = uuid.uuid4()
+    refresh_token = create_refresh_token({"sub": str(user.id)})
+    token_hash = hash_refresh_token(refresh_token)
+    db.add(RefreshToken(
+        id=session_id, user_id=user.id, token_hash=token_hash,
+        expires_at=datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+    ))
+    access_token = create_access_token({"sub": str(user.id), "sid": str(session_id)})
+    return access_token, refresh_token
+
+
+def _revoke_other_sessions(db: Session, user_id: uuid.UUID, session_id: uuid.UUID) -> None:
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == user_id,
+        RefreshToken.id != session_id,
+        RefreshToken.revoked.is_(False),
+    ).update({RefreshToken.revoked: True}, synchronize_session=False)
+
+
 def _build_auth_response(user: User | dict[str, Any], access_token: str) -> TokenResponse:
     user = UserResponse.model_validate(user)
     return TokenResponse(
@@ -139,7 +155,6 @@ def _build_unlock_response(db: Session, user: User) -> UnlockedVaultResponse:
             VaultItem.name,
             VaultItem.category,
             VaultItem.encrypted_data,
-            VaultItem.favicon_url,
             VaultItem.is_favourite,
             VaultItem.is_deleted,
             VaultItem.deleted_at,
@@ -151,14 +166,14 @@ def _build_unlock_response(db: Session, user: User) -> UnlockedVaultResponse:
             VaultItem.user_id == user.id,
             VaultItem.is_deleted.is_(False),
         )
-        .order_by(VaultItem.updated_at.desc())
+        .order_by(VaultItem.updated_at.desc(), VaultItem.id.asc())
         .limit(UNLOCK_PAGE_SIZE)
         .all()
     )
     total = int(rows[0].total_count) if rows else 0
 
     return UnlockedVaultResponse(
-        items=[serialize_vault_item(item, include_encrypted_data=True) for item in rows],
+        items=rows,
         total=total,
         page=1,
         page_size=UNLOCK_PAGE_SIZE,
@@ -248,17 +263,7 @@ def register(
     db.add(user)
     db.flush()
 
-    access_token = create_access_token({"sub": str(user.id)})
-    refresh_token = create_refresh_token({"sub": str(user.id)})
-    token_hash = hash_refresh_token(refresh_token)
-
-    db.add(
-        RefreshToken(
-            user_id=user.id,
-            token_hash=token_hash,
-            expires_at=datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
-        )
-    )
+    access_token, refresh_token = _start_session(db, user)
     verify_token = _issue_auth_token(
         db,
         user.id,
@@ -268,7 +273,7 @@ def register(
     log_action(db, user.id, "REGISTER", request)
     db.commit()
 
-    _warm_caches(user, token_hash)
+    _warm_caches(user)
     _set_refresh_cookie(response, refresh_token)
     if not _send_verification_email(user, verify_token):
         logger.warning("REGISTER verification email not delivered user=%s", user.id)
@@ -315,17 +320,7 @@ def login(
     if not _verify_master_password(user, body.master_password_verifier):
         raise HTTPException(status_code=401, detail=INVALID_EMAIL_OR_PASSWORD)
 
-    access_token = create_access_token({"sub": str(user.id)})
-    refresh_token = create_refresh_token({"sub": str(user.id)})
-    token_hash = hash_refresh_token(refresh_token)
-
-    db.add(
-        RefreshToken(
-            user_id=user.id,
-            token_hash=token_hash,
-            expires_at=datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
-        )
-    )
+    access_token, refresh_token = _start_session(db, user)
     log_action(db, user.id, "LOGIN", request)
 
     # Prune stale revoked tokens to keep the refresh_tokens table lean.
@@ -334,14 +329,14 @@ def login(
 
     db.commit()
 
-    _warm_caches(user, token_hash)
+    _warm_caches(user)
     _set_refresh_cookie(response, refresh_token)
 
     logger.info(f"LOGIN user={user.id}")
     return _build_auth_response(user, access_token)
 
 
-# Refresh — token rotation with Redis-first validation
+# Refresh — atomic rotation within a stable server-side session
 
 @router.post(
     "/refresh",
@@ -367,7 +362,6 @@ def refresh(  # NOSONAR - token rotation flow is intentionally explicit on this 
         if payload.get("type") != "refresh":
             _reject_refresh("Invalid token type")
         user_id = payload.get("sub")
-        jti = payload.get("jti", "")
     except InvalidTokenError:
         _reject_refresh("Invalid refresh token")
 
@@ -379,61 +373,60 @@ def refresh(  # NOSONAR - token rotation flow is intentionally explicit on this 
     except ValueError:
         _reject_refresh("Invalid token")
 
-    if is_token_blacklisted(jti):
-        _reject_refresh("Refresh token revoked")
-
     token_hash = hash_refresh_token(refresh_token)
-    # A conditional UPDATE is the rotation gate, even when Redis has stale data.
-    revoked_count = (
-        db.query(RefreshToken)
-        .filter(
-            RefreshToken.token_hash == token_hash,
-            RefreshToken.user_id == uuid.UUID(user_id),
-            RefreshToken.revoked.is_(False),
-            RefreshToken.expires_at > datetime.now(UTC),
-        )
-        .update({RefreshToken.revoked: True}, synchronize_session=False)
-    )
-    if revoked_count != 1:
+    user_uuid = uuid.UUID(user_id)
+    stored = db.query(RefreshToken).filter(
+        RefreshToken.token_hash == token_hash,
+        RefreshToken.user_id == user_uuid,
+        RefreshToken.revoked.is_(False),
+        RefreshToken.expires_at > datetime.now(UTC),
+    ).first()
+    if not stored:
         _reject_refresh("Refresh token expired or revoked")
-
-    cached_user = get_cached_user(user_id)
-    user = None
-    if cached_user is None:
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user or not user.is_active:
-            db.commit()  # persist DB revocation even if account is gone/disabled
-            _reject_refresh("Account not found or disabled")
-    elif not cached_user.get("is_active", True):
-        db.commit()
+    user = db.query(User).filter(User.id == user_uuid, User.is_active.is_(True)).first()
+    if not user:
         _reject_refresh("Account not found or disabled")
 
-    new_access = create_access_token({"sub": user_id})
     new_refresh = create_refresh_token({"sub": user_id})
     new_hash = hash_refresh_token(new_refresh)
-
-    db.add(
-        RefreshToken(
-            user_id=user_id,
-            token_hash=new_hash,
-            expires_at=datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
-        )
-    )
-    log_action(db, user_id, "TOKEN_REFRESH", request)
-    db.commit()  # old token revoked + new token persisted atomically
-    # Clear old token from cache only after DB commit succeeds
-    revoke_refresh_token_cache(token_hash, jti, _RT_TTL_SECONDS)
-
-    if user is not None:
-        _warm_caches(user, new_hash)
-        response_model = _build_auth_response(user, new_access)
-    else:
-        cache_refresh_token_valid(new_hash, user_id, _RT_TTL_SECONDS)
-        response_model = _build_auth_response(cached_user, new_access)
+    # Keep a stable session ID; compare-and-swap prevents replay or resurrection.
+    rotated = db.query(RefreshToken).filter(
+        RefreshToken.id == stored.id,
+        RefreshToken.token_hash == token_hash,
+        RefreshToken.revoked.is_(False),
+        RefreshToken.expires_at > datetime.now(UTC),
+    ).update({
+        RefreshToken.token_hash: new_hash,
+        RefreshToken.expires_at: datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+    }, synchronize_session=False)
+    if rotated != 1:
+        _reject_refresh("Refresh token expired or revoked")
+    new_access = create_access_token({"sub": user_id, "sid": str(stored.id)})
+    log_action(db, user_uuid, "TOKEN_REFRESH", request)
+    db.commit()
+    _warm_caches(user)
+    response_model = _build_auth_response(user, new_access)
     _set_refresh_cookie(response, new_refresh)
 
     logger.info(f"TOKEN_REFRESH user={user_id}")
     return response_model
+
+
+@router.post("/sessions/revoke-others", response_model=MessageResponse)
+@limiter.limit("5/minute")
+def revoke_other_sessions(
+    body: VerifyMasterPasswordRequest,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: DBUser,
+    subject: CurrentSubject,
+):
+    if not _verify_master_password(current_user, body.master_password_verifier):
+        raise HTTPException(status_code=401, detail=INVALID_MASTER_PASSWORD)
+    _revoke_other_sessions(db, current_user.id, subject.session_id)
+    log_action(db, current_user.id, "OTHER_SESSIONS_REVOKED", request)
+    db.commit()
+    return MessageResponse(message="Other sessions signed out. This browser remains signed in.")
 
 
 # Logout
@@ -449,7 +442,6 @@ def logout(
     if refresh_token:
         try:
             payload = decode_token(refresh_token)
-            jti = payload.get("jti", "")
             user_id = payload.get("sub", "")
             token_hash = hash_refresh_token(refresh_token)
 
@@ -457,10 +449,9 @@ def logout(
             if stored:
                 stored.revoked = True
 
-            log_action(db, user_id, "LOGOUT", request)
+            log_action(db, uuid.UUID(user_id), "LOGOUT", request)
             db.commit()
 
-            revoke_refresh_token_cache(token_hash, jti, _RT_TTL_SECONDS)
             invalidate_user(user_id)
             invalidate_all_vault(user_id)
             logger.info(f"LOGOUT user={user_id} — all caches purged")
@@ -623,6 +614,7 @@ def change_master_password(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_user: DBUser,
+    subject: CurrentSubject,
 ):
     if not _verify_master_password(current_user, body.current_master_password_verifier):
         raise HTTPException(status_code=401, detail=INVALID_MASTER_PASSWORD)
@@ -651,6 +643,7 @@ def change_master_password(
     current_user.hashed_password = hash_password(body.new_master_password_verifier)
     current_user.vault_salt = body.new_vault_salt
     current_user.master_hint = body.master_hint
+    _revoke_other_sessions(db, current_user.id, subject.session_id)
     log_action(db, current_user.id, "MASTER_PASSWORD_CHANGED", request)
     db.commit()
     db.refresh(current_user)
