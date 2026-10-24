@@ -1,5 +1,6 @@
 'use client';
 import { useCallback } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface PaginationProps {
   page: number;
@@ -12,14 +13,15 @@ const BTN_STYLE = {
   borderRadius: 'var(--radius-sm)',
 } as const;
 
-function NavButton({ label, disabled, onClick }: Readonly<{
-  label: string; disabled: boolean; onClick: () => void;
+function NavButton({ direction, disabled, onClick }: Readonly<{
+  direction: 'previous' | 'next'; disabled: boolean; onClick: () => void;
 }>) {
+  const Icon = direction === 'previous' ? ChevronLeft : ChevronRight;
   return (
     <button type="button" className="btn-icon" disabled={disabled} onClick={onClick}
-      aria-label={label === '‹' ? 'Previous page' : 'Next page'}
+      aria-label={direction === 'previous' ? 'Previous page' : 'Next page'}
       style={{ ...BTN_STYLE, opacity: disabled ? 0.3 : 1 }}>
-      {label}
+      <Icon size={17} aria-hidden="true" />
     </button>
   );
 }
@@ -67,7 +69,7 @@ export function Pagination({ page, totalPages, onPageChange }: Readonly<Paginati
       gap: 3, padding: '10px 8px',
       borderTop: '1px solid var(--border)', flexShrink: 0,
     }}>
-      <NavButton label="‹" disabled={page === 1} onClick={goPrev} />
+      <NavButton direction="previous" disabled={page === 1} onClick={goPrev} />
 
       {withEllipsis.map(p =>
         typeof p === 'string' ? (
@@ -79,7 +81,7 @@ export function Pagination({ page, totalPages, onPageChange }: Readonly<Paginati
         )
       )}
 
-      <NavButton label="›" disabled={page === totalPages} onClick={goNext} />
+      <NavButton direction="next" disabled={page === totalPages} onClick={goNext} />
     </div>
   );
 }
