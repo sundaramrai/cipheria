@@ -7,8 +7,6 @@ Key families:
   vault:list:{user_id}:{ver}:{hash}      5 min
   vault:sidebar:{user_id}:{ver}          5 min
   vault:item:{user_id}:{item_id}        10 min
-  rt:valid:{token_hash}                 until token expiry
-  rt:revoked:{jti}                      until token expiry
 """
 
 import hashlib
@@ -74,7 +72,7 @@ def _set(key: str, value: Any, ttl: int) -> None:
         return
     try:
         _redis.setex(key, ttl, json.dumps(value, default=str))
-    except (RedisError, ValueError, TypeError, UnicodeError) as exc:
+    except (RedisError, ValueError, TypeError) as exc:
         logger.warning("Cache SET error [%s]: %s", key, exc)
 
 
@@ -112,7 +110,7 @@ def _get_vault_list_version(user_id: str) -> int:
     try:
         raw = _redis.get(_vault_list_version_key(user_id))
         return int(raw) if raw else 1
-    except (RedisError, ValueError, TypeError, UnicodeError) as exc:
+    except (RedisError, ValueError, TypeError) as exc:
         logger.warning("Cache version read error [vault:list:%s]: %s", user_id, exc)
         return 1
 
@@ -213,25 +211,6 @@ def invalidate_vault_item(user_id: str, item_id: str) -> None:
 def invalidate_all_vault(user_id: str) -> None:
     _bump_vault_list_version(user_id)
     _delete_pattern(f"vault:item:{user_id}:*")
-
-
-def cache_refresh_token_valid(token_hash: str, user_id: str, ttl_seconds: int) -> None:
-    _set(f"rt:valid:{token_hash}", {"user_id": user_id}, ttl_seconds)
-
-
-def get_cached_refresh_token(token_hash: str) -> dict | None:
-    return _get(f"rt:valid:{token_hash}")
-
-
-def revoke_refresh_token_cache(token_hash: str, jti: str, ttl_seconds: int) -> None:
-    _delete(f"rt:valid:{token_hash}")
-    _set(f"rt:revoked:{jti}", {"revoked": True}, ttl_seconds)
-
-
-def is_token_blacklisted(jti: str) -> bool:
-    if _redis is None:
-        return False
-    return _get(f"rt:revoked:{jti}") is not None
 
 
 def cache_ping() -> bool:
