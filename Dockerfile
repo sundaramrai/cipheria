@@ -1,8 +1,8 @@
-FROM node:22-bookworm-slim AS base
+FROM node:24-bookworm-slim AS base
 
 WORKDIR /app
 
-RUN corepack enable
+RUN npm install --global pnpm@12.15.0 --allow-scripts=pnpm
 
 FROM base AS dev
 
@@ -29,7 +29,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN pnpm build
 
-FROM node:22-bookworm-slim AS runner
+FROM node:24-bookworm-slim AS runner
 
 WORKDIR /app
 
@@ -37,8 +37,6 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV NEXT_TELEMETRY_DISABLED=1
-
-RUN corepack enable
 
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/standalone ./
