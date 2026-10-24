@@ -5,6 +5,10 @@ import { KeyRound, Mail, Settings, Trash2, UserRound, MonitorCog, MoonStar, SunM
 import { Modal } from './ItemModal';
 import { applyThemePreference, getStoredThemePreference } from '@/lib/theme';
 import type { ThemePreference } from '@/lib/theme';
+import { authApi } from '@/lib/api';
+import { deriveMasterPasswordVerifier } from '@/lib/crypto';
+import { toastService } from '@/lib/toast';
+import { parseApiError } from '@/lib/errors';
 
 type ProfileForm = {
   full_name: string;
@@ -22,6 +26,7 @@ interface SettingsModalProps {
   user: {
     email?: string;
     email_verified?: boolean;
+    vault_salt: string;
   } | null;
   profileForm: ProfileForm;
   setProfileForm: (form: ProfileForm) => void;
@@ -91,6 +96,24 @@ export function SettingsModal({
   onDeleteAccount,
 }: Readonly<SettingsModalProps>) {
   const [theme, setTheme] = useState<ThemePreference>('system');
+  const [sessionPassword, setSessionPassword] = useState('');
+  const [revokingSessions, setRevokingSessions] = useState(false);
+
+  const handleRevokeSessions = async (event: React.SyntheticEvent) => {
+    event.preventDefault();
+    if (!user || revokingSessions) return;
+    setRevokingSessions(true);
+    try {
+      const verifier = await deriveMasterPasswordVerifier(sessionPassword, user.vault_salt);
+      const { data } = await authApi.revokeOtherSessions(verifier);
+      setSessionPassword('');
+      toastService.success(data.message);
+    } catch (error) {
+      toastService.error(parseApiError(error, 'Could not sign out other sessions'));
+    } finally {
+      setRevokingSessions(false);
+    }
+  };
 
   useEffect(() => {
     setTheme(getStoredThemePreference());
@@ -104,6 +127,7 @@ export function SettingsModal({
   return (
     <Modal
       onClose={onClose}
+      closeDisabled={revokingSessions || masterPasswordSaving || deletingAccount}
       title="Account Settings"
       icon={<Settings size={14} color="var(--accent)" />}
     >
@@ -199,7 +223,7 @@ export function SettingsModal({
             <h4 style={{ color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 600 }}>Master Password</h4>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.6 }}>
-            You can change your master password only while the vault is unlocked. Cipheria re-encrypts every vault item, including items in trash, with the new password and rotates your vault salt.
+            Cipheria re-encrypts every vault item, including password history and items in trash, with the new password. Your other sessions are signed out.
           </p>
           <form onSubmit={onChangeMasterPassword} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
@@ -245,6 +269,26 @@ export function SettingsModal({
             </div>
             <button type="submit" className="btn-primary" disabled={masterPasswordSaving}>
               {masterPasswordSaving ? 'Re-encrypting…' : 'Change Master Password'}
+            </button>
+          </form>
+        </section>
+
+        <div className="hairline" />
+
+        <section style={sectionStyle}>
+          <h4 style={{ color: 'var(--text-primary)' }}>Sessions</h4>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.6 }}>
+            Sign out other browsers and devices. This browser and its tabs stay signed in.
+            Other sessions lose server access; already viewed data cannot be erased remotely.
+          </p>
+          <form onSubmit={handleRevokeSessions} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <label htmlFor="settings-session-password" style={labelStyle}>MASTER PASSWORD</label>
+            <input id="settings-session-password" className="input-field" type="password"
+              autoComplete="current-password" required value={sessionPassword}
+              disabled={revokingSessions || masterPasswordSaving}
+              onChange={(event) => setSessionPassword(event.target.value)} />
+            <button type="submit" className="btn-ghost" disabled={revokingSessions || masterPasswordSaving || !user}>
+              {revokingSessions ? 'Signing out…' : 'Sign out other sessions'}
             </button>
           </form>
         </section>
