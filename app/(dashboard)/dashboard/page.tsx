@@ -4,20 +4,21 @@ import { useRouter } from 'next/navigation';
 import { toastService } from '@/lib/toast';
 import { getItemLoadError, getSessionAwareError } from '@/lib/errors';
 import { useAuthStore } from '@/lib/store';
-import type { VaultItem } from '@/lib/types';
+import type { DecryptedPayload, VaultItem } from '@/lib/types';
 import { vaultApi, authApi } from '@/lib/api';
 import { emitAuthEvent } from '@/lib/authSync';
-import { deriveKey, deriveMasterPasswordVerifier, encryptData, decryptData, generateSaltHex } from '@/lib/crypto';
+import { deriveKey, deriveMasterPasswordVerifier, encryptData, decryptData, generateSaltHex, withPasswordHistory } from '@/lib/crypto';
 import { Category, emptyForm } from '../../../components/dashboard/types';
 import type { ItemForm } from '../../../components/dashboard/types';
-import { tryGetFaviconUrl, fetchAndDecryptItem, buildPayload } from '../../../components/dashboard/utils';
+import { fetchAndDecryptItem, buildPayload } from '../../../components/dashboard/utils';
 import { useDashboardSession } from '@/components/dashboard/hooks/useDashboardSession';
 import { useVaultUnlock } from '@/components/dashboard/hooks/useVaultUnlock';
 import { useVaultViews } from '@/components/dashboard/hooks/useVaultViews';
 import {
   applySidebarDelta, buildViewRequest, clampPage, computeTotalPages, getMatchDelta,
-  getViewCacheKey, itemMatchesSearch, itemMatchesView, reconcileVisibleItems,
+  getViewCacheKey, itemMatchesView, reconcileVisibleItems,
 } from '@/components/dashboard/vaultView';
+import { itemMatchesSearch } from '@/lib/vaultSearch';
 import { LockedVaultScreen } from '../../../components/dashboard/LockedVaultScreen';
 import { MainDashboard } from '../../../components/dashboard/MainDashboard';
 import { SettingsModal } from '@/components/dashboard/SettingsModal';
@@ -68,14 +69,20 @@ export default function Page() {
     currentSelectionRef.current = null;
     setSelectedItem(null);
     setSelectedItemLoading(false);
+    setHibp({ checking: false, count: null });
   }, []);
   const {
     category, setCategory, viewMode, setViewMode, isFavouritesView, isTrashView,
     listLoading, page, setPage, totalPages, setTotalPages, totalItems, setTotalItems,
     sidebarCounts, setSidebarCounts, getCurrentView, setCachedView, cacheAllView,
     invalidateCachedViews, restoreCachedView, restoreOrHydrateView, loadVaultPage,
-    search, resetSearch, runSearch, queueSearch,
+    search, searchError, resetSearch, runSearch, queueSearch,
   } = useVaultViews({ isAuthenticated, isVaultLocked, setVaultItems, clearSelection });
+  const activeViewRef = useRef({ view: getCurrentView(), search: '', page: 1 });
+  const viewSwitchRef = useRef(0);
+  useEffect(() => {
+    activeViewRef.current = { view: getCurrentView(), search: search.trim().toLowerCase(), page };
+  }, [getCurrentView, page, search]);
   const { masterPassword, setMasterPassword, unlocking, unlockVault } =
     useVaultUnlock(
       user,
@@ -94,9 +101,9 @@ export default function Page() {
   useEffect(() => {
     if (isVaultLocked) {
       decryptingItemIds.current.clear();
-      currentSelectionRef.current = null;
+      clearSelection();
     }
-  }, [isVaultLocked]);
+  }, [clearSelection, isVaultLocked]);
 
   useEffect(() => {
     setProfileForm({
@@ -122,13 +129,20 @@ export default function Page() {
     after: VaultItem | null,
     view = getCurrentView(),
   ) => {
+    if (useAuthStore.getState().isVaultLocked) return;
     const activeSearch = search.trim().toLowerCase();
+    setSidebarCounts((current) => applySidebarDelta(current, before, after));
+    const active = activeViewRef.current;
+    if (getViewCacheKey(view) !== getViewCacheKey(active.view) ||
+        activeSearch !== active.search || page !== active.page) {
+      invalidateCachedViews();
+      return;
+    }
     const totalDelta = getMatchDelta(before, after, (item) =>
       itemMatchesView(item, view) && (!activeSearch || itemMatchesSearch(item, activeSearch)));
     const nextTotalItems = Math.max(0, (totalItems ?? 0) + totalDelta);
     const nextTotalPages = computeTotalPages(nextTotalItems);
 
-    setSidebarCounts((current) => applySidebarDelta(current, before, after));
     setTotalItems(nextTotalItems);
     setTotalPages(nextTotalPages);
     setPage((current) => clampPage(current, nextTotalPages));
@@ -141,7 +155,7 @@ export default function Page() {
         items: nextItems, page: clampPage(page, nextTotalPages), totalPages: nextTotalPages, totalItems: nextTotalItems,
       });
     }
-    if (totalDelta < 0) {
+    if (totalDelta < 0 || activeSearch) {
       const nextPage = clampPage(page, nextTotalPages);
       const refresh = activeSearch
         ? runSearch(search, nextPage, view, true)
@@ -152,9 +166,9 @@ export default function Page() {
     }
   }, [getCurrentView, invalidateCachedViews, loadVaultPage, page, runSearch, search, setCachedView, setPage, setSidebarCounts, setTotalItems, setTotalPages, setVaultItems, totalItems, vaultItems]);
 
-  const buildEncryptedPayload = useCallback(async (form: ItemForm) => {
+  const buildEncryptedPayload = useCallback(async (form: ItemForm, previous?: DecryptedPayload) => {
     if (!cryptoKey) throw new Error('Crypto key not available');
-    const payload = buildPayload(form);
+    const payload = withPasswordHistory(buildPayload(form), previous);
     const encrypted_data = await encryptData(payload, cryptoKey);
     return { payload, encrypted_data };
   }, [cryptoKey]);
@@ -187,21 +201,26 @@ export default function Page() {
     decryptingItemIds.current.add(item.id);
     setSelectedItemLoading(true);
     try {
-      const enriched = await fetchAndDecryptItem(item, liveKey, updateVaultItem);
-      if (currentSelectionRef.current === item.id) setSelectedItem(enriched);
+      const enriched = await fetchAndDecryptItem(item, liveKey, (id, updated) => {
+        if (useAuthStore.getState().cryptoKey === liveKey) updateVaultItem(id, updated);
+      });
+      if (currentSelectionRef.current === item.id && useAuthStore.getState().cryptoKey === liveKey) setSelectedItem(enriched);
     } catch (err: unknown) {
       console.error('[handleSelectItem] Failed for item', item.id, err);
-      toastService.error(getItemLoadError(err));
+      if (currentSelectionRef.current === item.id && useAuthStore.getState().cryptoKey === liveKey) {
+        clearSelection();
+        toastService.error(getItemLoadError(err));
+      }
     } finally {
       decryptingItemIds.current.delete(item.id);
-      if (currentSelectionRef.current === item.id) setSelectedItemLoading(false);
+      if (currentSelectionRef.current === item.id && useAuthStore.getState().cryptoKey === liveKey) setSelectedItemLoading(false);
     }
-  }, [updateVaultItem]);
+  }, [clearSelection, updateVaultItem]);
 
   // Debounced search
   const handleSearchChange = useCallback((val: string) => {
     clearSelection();
-    if (!val) {
+    if (!val.trim()) {
       resetSearch();
       const view = getCurrentView();
       if (!restoreOrHydrateView(view)) {
@@ -227,8 +246,7 @@ export default function Page() {
         'Saving to vault...',
         async () => {
           const { encrypted_data, payload } = await buildEncryptedPayload(newItem);
-          const favicon_url = newItem.url ? tryGetFaviconUrl(newItem.url) : undefined;
-          const { data } = await vaultApi.create({ name: newItem.name, category: newItem.category, encrypted_data, favicon_url });
+          const { data } = await vaultApi.create({ name: newItem.name, category: newItem.category, encrypted_data });
           applyOptimisticMutation(null, { ...data, decrypted: payload });
           setShowAddModal(false);
           setNewItem({ ...emptyForm });
@@ -264,17 +282,17 @@ export default function Page() {
         'Updating item...',
         async () => {
           const previousItem = selectedItem;
-          const { payload, encrypted_data } = await buildEncryptedPayload(editForm);
-          const favicon_url = editForm.url
-            ? (tryGetFaviconUrl(editForm.url) ?? selectedItem.favicon_url)
-            : selectedItem.favicon_url;
-          const { data } = await vaultApi.update(selectedItem.id, { name: editForm.name, category: editForm.category, encrypted_data, favicon_url });
+          const { payload, encrypted_data } = await buildEncryptedPayload(editForm, previousItem.decrypted);
+          const { data } = await vaultApi.update(selectedItem.id, { name: editForm.name, category: editForm.category, encrypted_data });
           const updated = { ...data, decrypted: payload };
           updateVaultItem(selectedItem.id, updated);
-          if (itemMatchesView(updated, getCurrentView()) && itemMatchesSearch(updated, search.trim().toLowerCase())) {
-            setSelectedItem(updated);
-          } else {
-            setSelectedItem(null);
+          if (currentSelectionRef.current === updated.id) {
+            const active = activeViewRef.current;
+            if (itemMatchesView(updated, active.view) && itemMatchesSearch(updated, active.search)) {
+              setSelectedItem(updated);
+            } else {
+              clearSelection();
+            }
           }
           applyOptimisticMutation(previousItem, updated);
           setShowEditModal(false);
@@ -284,7 +302,7 @@ export default function Page() {
         { fallbackError: 'Failed to update item' },
       );
     } finally { setUpdatingItem(false); }
-  }, [applyOptimisticMutation, buildEncryptedPayload, cryptoKey, editForm, getCurrentView, search, selectedItem, updateVaultItem]);
+  }, [applyOptimisticMutation, buildEncryptedPayload, clearSelection, cryptoKey, editForm, selectedItem, updateVaultItem]);
 
   const handleDelete = useCallback(async (id: string, onAfterDelete?: () => void) => {
     if (deletingId) return;
@@ -305,8 +323,8 @@ export default function Page() {
           } else {
             await refreshCurrentView(page);
           }
-          if (selectedItem?.id === id) {
-            setSelectedItem(null);
+          if (currentSelectionRef.current === id) {
+            clearSelection();
             onAfterDelete?.();
           }
         },
@@ -314,7 +332,7 @@ export default function Page() {
         { fallbackError: 'Failed to move item to trash' },
       );
     } finally { setDeletingId(null); }
-  }, [applyOptimisticMutation, deletingId, getKnownItemById, page, refreshCurrentView, selectedItem]);
+  }, [applyOptimisticMutation, clearSelection, deletingId, getKnownItemById, page, refreshCurrentView]);
 
   const handleToggleFav = useCallback(async (item: VaultItem) => {
     const adding = !item.is_favourite;
@@ -322,19 +340,20 @@ export default function Page() {
       adding ? 'Adding to favourites...' : 'Removing from favourites...',
       async () => {
         const previousItem = selectedItem?.id === item.id ? selectedItem : item;
-        await vaultApi.update(item.id, { is_favourite: adding });
-        const updated = { ...previousItem, is_favourite: adding, updated_at: new Date().toISOString() };
+        const { data } = await vaultApi.update(item.id, { is_favourite: adding });
+        const updated = { ...previousItem, ...data };
         updateVaultItem(item.id, updated);
-        if (selectedItem?.id === item.id && (!isFavouritesView || adding)) setSelectedItem(updated);
-        if (isFavouritesView && !adding && selectedItem?.id === item.id) {
-          setSelectedItem(null);
+        if (currentSelectionRef.current === item.id) {
+          const active = activeViewRef.current;
+          if (itemMatchesView(updated, active.view) && itemMatchesSearch(updated, active.search)) setSelectedItem(updated);
+          else clearSelection();
         }
         applyOptimisticMutation(previousItem, updated);
       },
       adding ? 'Added to favourites' : 'Removed from favourites',
       { fallbackError: 'Failed to update favourite' },
     );
-  }, [applyOptimisticMutation, isFavouritesView, selectedItem, updateVaultItem]);
+  }, [applyOptimisticMutation, clearSelection, selectedItem, updateVaultItem]);
 
   const copyToClipboard = useCallback(async (text: string, label: string) => {
     try {
@@ -475,8 +494,8 @@ export default function Page() {
       async () => {
         const previousItem = getKnownItemById(id);
         const { data } = await vaultApi.restore(id);
-        if (selectedItem?.id === id) {
-          setSelectedItem(null);
+        if (currentSelectionRef.current === id) {
+          clearSelection();
         }
         if (previousItem) {
           applyOptimisticMutation(previousItem, data);
@@ -487,7 +506,7 @@ export default function Page() {
       'Restored item',
       { fallbackError: 'Failed to restore item' },
     );
-  }, [applyOptimisticMutation, getKnownItemById, page, refreshCurrentView, selectedItem]);
+  }, [applyOptimisticMutation, clearSelection, getKnownItemById, page, refreshCurrentView]);
 
   const handleDeletePermanent = useCallback(async (id: string) => {
     if (deletingId) return false;
@@ -498,7 +517,7 @@ export default function Page() {
         async () => {
           const previousItem = getKnownItemById(id);
           await vaultApi.deletePermanent(id);
-          if (selectedItem?.id === id) setSelectedItem(null);
+          if (currentSelectionRef.current === id) clearSelection();
           if (previousItem) {
             applyOptimisticMutation(previousItem, null);
           } else {
@@ -513,9 +532,10 @@ export default function Page() {
     } finally {
       setDeletingId(null);
     }
-  }, [applyOptimisticMutation, deletingId, getKnownItemById, page, refreshCurrentView, selectedItem]);
+  }, [applyOptimisticMutation, clearSelection, deletingId, getKnownItemById, page, refreshCurrentView]);
 
   const handlePageChange = useCallback(async (newPage: number) => {
+    if (newPage === page) return;
     clearSelection();
     try {
       if (search.trim()) {
@@ -526,7 +546,7 @@ export default function Page() {
     } catch (err) {
       console.error('[pagination] Failed to load page', newPage, err);
     }
-  }, [clearSelection, loadVaultPage, runSearch, search]);
+  }, [clearSelection, loadVaultPage, page, runSearch, search]);
 
   const switchView = useCallback(async (
     nextCategory: Category,
@@ -535,6 +555,9 @@ export default function Page() {
   ) => {
     const nextFavouritesView = source === 'favourites' && enabled;
     const nextTrashView = source === 'trash' && enabled;
+    const nextViewMode = enabled ? source : 'category';
+    if (nextCategory === category && nextViewMode === viewMode) return;
+    const switchId = ++viewSwitchRef.current;
     const previousCategory = category;
     const previousViewMode = viewMode;
     const nextView = buildViewRequest(nextCategory, nextFavouritesView, nextTrashView);
@@ -545,6 +568,7 @@ export default function Page() {
     try {
       await loadVaultPage(1, nextView);
     } catch (err) {
+      if (switchId !== viewSwitchRef.current) return;
       setCategory(previousCategory);
       setViewMode(previousViewMode);
       toastService.error(getSessionAwareError(err, 'Vault is temporarily unavailable'));
@@ -592,6 +616,7 @@ export default function Page() {
         category={category}
         setCategory={handleCategoryChange}
         searchValue={search}
+        searchError={searchError}
         onSearchChange={handleSearchChange}
         handleExport={handleExport}
         onOpenSettings={handleOpenSettings}
@@ -603,6 +628,7 @@ export default function Page() {
         handleLogout={handleLogout}
         sidebarCounts={sidebarCounts}
         selectedItem={selectedItem}
+        clearSelection={clearSelection}
         handleSelectItem={handleSelectItem}
         selectedItemLoading={selectedItemLoading}
         handleToggleFav={handleToggleFav}
