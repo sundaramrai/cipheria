@@ -73,7 +73,7 @@ class User(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
-    # Password hint - never the actual password
+    # Unencrypted hint included in the account profile.
     master_hint = Column(String(255), nullable=True)
     # Salt for client-side PBKDF2 key derivation
     vault_salt = Column(
@@ -88,9 +88,8 @@ class VaultItem(Base):
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     category = Column(String(64), default="login")  # login, card, note, identity
-    # All sensitive fields are AES-256-GCM encrypted client-side before storage
+    # Browser-encrypted JSON payload; name and category remain separate metadata.
     encrypted_data = Column(Text, nullable=False)
-    favicon_url = Column(String(512), nullable=True)
     is_favourite = Column(Boolean, default=False)
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(TIMESTAMP(timezone=True), nullable=True)
