@@ -1,3 +1,7 @@
+# Keep a single-document lockfile so GitHub can scan project dependencies.
+# Install the packageManager version explicitly; pnpm will not switch versions.
+pmOnFail: ignore
+
 allowBuilds:
   sharp: true
   unrs-resolver: true
