@@ -4,11 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSessionAwareError } from '@/lib/errors';
 import { useAuthStore } from '@/lib/store';
 import { toastService } from '@/lib/toast';
+import { vaultApi } from '@/lib/api';
+import { decryptData } from '@/lib/crypto';
+import { itemMatchesSearch, loadSearchItems } from '@/lib/vaultSearch';
 import type { SidebarCounts, VaultItem } from '@/lib/types';
 import type { Category } from '../types';
 import {
-  EMPTY_SIDEBAR_COUNTS, PAGE_SIZE, buildViewRequest, computeTotalPages,
-  getViewCacheKey, getViewTotalCount, itemMatchesView, rehydrateListItem,
+  EMPTY_SIDEBAR_COUNTS, buildViewRequest,
+  buildVaultListParams, getViewCacheKey, getViewTotalCount, itemMatchesView, paginateItems, rehydrateListItem,
   requestVaultPage, sortByUpdatedDesc,
 } from '../vaultView';
 import type { CachedViewState, ViewRequest } from '../vaultView';
@@ -34,8 +37,9 @@ export function useVaultViews({ isAuthenticated, isVaultLocked, setVaultItems, c
   const [totalItems, setTotalItems] = useState<number | null>(null);
   const [sidebarCounts, setSidebarCounts] = useState<SidebarCounts>(EMPTY_SIDEBAR_COUNTS);
   const [search, setSearch] = useState('');
+  const [searchError, setSearchError] = useState<string | null>(null);
   const viewCacheRef = useRef<Record<string, CachedViewState>>({});
-  const normalItemsRef = useRef<VaultItem[] | null>(null);
+  const searchIndexRef = useRef<{ viewKey: string; key: CryptoKey; items: VaultItem[] } | null>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const shouldRestoreActiveViewRef = useRef(false);
@@ -43,10 +47,7 @@ export function useVaultViews({ isAuthenticated, isVaultLocked, setVaultItems, c
   const inFlightViewLoadsRef = useRef<Record<string, Promise<LoadedViewState>>>({});
 
   const getCurrentView = useCallback(
-    (overrides: Partial<ViewRequest> = {}): ViewRequest => ({
-      ...buildViewRequest(category, isFavouritesView, isTrashView),
-      ...overrides,
-    }),
+    () => buildViewRequest(category, isFavouritesView, isTrashView),
     [category, isFavouritesView, isTrashView],
   );
 
@@ -59,7 +60,7 @@ export function useVaultViews({ isAuthenticated, isVaultLocked, setVaultItems, c
   }, [setCachedView]);
 
   const invalidateCachedViews = useCallback((exceptKey?: string) => {
-    normalItemsRef.current = null;
+    searchIndexRef.current = null;
     if (!exceptKey) {
       viewCacheRef.current = {};
       return;
@@ -68,48 +69,39 @@ export function useVaultViews({ isAuthenticated, isVaultLocked, setVaultItems, c
     viewCacheRef.current = preserved ? { [exceptKey]: preserved } : {};
   }, []);
 
-  const restoreCachedView = useCallback((key: string) => {
-    const cached = viewCacheRef.current[key];
-    if (!cached) return false;
-    setVaultItems(cached.items);
-    setPage(cached.page);
-    setTotalPages(cached.totalPages);
-    setTotalItems(cached.totalItems);
-    clearSelection();
-    return true;
-  }, [clearSelection, setVaultItems]);
-
   const applyResolvedView = useCallback((
-    view: ViewRequest, nextState: CachedViewState, preserveSelection = false, cache = true,
+    nextState: CachedViewState, preserveSelection = false, cacheKey?: string,
   ) => {
     setVaultItems(nextState.items);
     setPage(nextState.page);
     setTotalPages(nextState.totalPages);
     setTotalItems(nextState.totalItems);
-    if (cache) setCachedView(getViewCacheKey(view), nextState);
+    if (cacheKey) setCachedView(cacheKey, nextState);
     if (!preserveSelection) clearSelection();
   }, [clearSelection, setCachedView, setVaultItems]);
+
+  const restoreCachedView = useCallback((key: string) => {
+    const cached = viewCacheRef.current[key];
+    if (!cached) return false;
+    applyResolvedView(cached);
+    return true;
+  }, [applyResolvedView]);
 
   const hydrateViewFromLocalData = useCallback((view: ViewRequest) => {
     const totalCount = getViewTotalCount(view, sidebarCounts);
     if (totalCount === 0) {
-      applyResolvedView(view, { items: [], page: 1, totalPages: 0, totalItems: 0 });
+      applyResolvedView(paginateItems([]), false, getViewCacheKey(view));
       return true;
     }
     if (view.deletedOnly) return false;
 
     const cachedAllView = viewCacheRef.current.all;
-    if (!cachedAllView || cachedAllView.page !== 1 ||
+    if (cachedAllView?.page !== 1 ||
         cachedAllView.totalItems !== sidebarCounts.all ||
         cachedAllView.items.length !== cachedAllView.totalItems) return false;
 
     const matchingItems = sortByUpdatedDesc(cachedAllView.items.filter((item) => itemMatchesView(item, view)));
-    applyResolvedView(view, {
-      items: matchingItems.slice(0, PAGE_SIZE),
-      page: 1,
-      totalPages: computeTotalPages(matchingItems.length),
-      totalItems: matchingItems.length,
-    });
+    applyResolvedView(paginateItems(matchingItems), false, getViewCacheKey(view));
     return true;
   }, [applyResolvedView, sidebarCounts]);
 
@@ -119,20 +111,17 @@ export function useVaultViews({ isAuthenticated, isVaultLocked, setVaultItems, c
   }, [hydrateViewFromLocalData, restoreCachedView]);
 
   const fetchVaultPage = useCallback(async (
-    requestedPage: number, view: ViewRequest, term?: string, signal?: AbortSignal,
+    requestedPage: number, view: ViewRequest,
   ): Promise<LoadedViewState> => {
     const requestKey = `${getViewCacheKey(view)}:${requestedPage}`;
-    const existingRequest = term ? undefined : inFlightViewLoadsRef.current[requestKey];
+    const existingRequest = inFlightViewLoadsRef.current[requestKey];
     if (existingRequest !== undefined) return await existingRequest;
 
     const requestPromise = (async () => {
-      const { data, page } = await requestVaultPage(view, requestedPage, term, signal);
+      const { data, page } = await requestVaultPage(view, requestedPage);
       const { vaultItems: storeItems } = useAuthStore.getState();
-      const cachedItems = term ? [...storeItems, ...(normalItemsRef.current ?? [])] : storeItems;
       return {
-        items: data.items.map((item: VaultItem) => term
-          ? cachedItems.find((cached) => cached.id === item.id && cached.decrypted) ?? item
-          : rehydrateListItem(item, storeItems)),
+        items: data.items.map((item: VaultItem) => rehydrateListItem(item, storeItems)),
         page,
         totalPages: data.total_pages ?? 0,
         totalItems: data.total ?? 0,
@@ -140,41 +129,59 @@ export function useVaultViews({ isAuthenticated, isVaultLocked, setVaultItems, c
       };
     })();
 
-    if (!term) inFlightViewLoadsRef.current[requestKey] = requestPromise;
+    inFlightViewLoadsRef.current[requestKey] = requestPromise;
     try {
       return await requestPromise;
     } finally {
-      if (!term) delete inFlightViewLoadsRef.current[requestKey];
+      delete inFlightViewLoadsRef.current[requestKey];
     }
   }, []);
 
   const loadVaultPage = useCallback(async (
     newPage: number,
-    view: ViewRequest = buildViewRequest(category, isFavouritesView, isTrashView),
+    view: ViewRequest = getCurrentView(),
     preserveSelection = false,
-    term?: string,
-    signal?: AbortSignal,
   ) => {
     const requestId = ++listRequestIdRef.current;
     if (!preserveSelection) clearSelection();
     setListLoading(true);
     try {
-      const nextState = await fetchVaultPage(newPage, view, term, signal);
-      if (signal?.aborted || requestId !== listRequestIdRef.current) return;
+      const nextState = await fetchVaultPage(newPage, view);
+      if (requestId !== listRequestIdRef.current) return;
       if (nextState.sidebarCounts) setSidebarCounts(nextState.sidebarCounts);
-      applyResolvedView(view, nextState, preserveSelection, !term);
+      applyResolvedView(nextState, preserveSelection, getViewCacheKey(view));
     } finally {
       if (requestId === listRequestIdRef.current) setListLoading(false);
     }
-  }, [applyResolvedView, category, clearSelection, fetchVaultPage, isFavouritesView, isTrashView]);
+  }, [applyResolvedView, clearSelection, fetchVaultPage, getCurrentView]);
 
   const resetSearch = useCallback(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchAbortRef.current?.abort();
     listRequestIdRef.current += 1;
-    normalItemsRef.current = null;
+    searchIndexRef.current = null;
     setSearch('');
+    setSearchError(null);
     setListLoading(false);
+  }, []);
+
+  const getSearchItems = useCallback(async (view: ViewRequest, key: CryptoKey, signal: AbortSignal) => {
+    const viewKey = getViewCacheKey(view);
+    const cached = searchIndexRef.current;
+    if (cached?.viewKey === viewKey && cached.key === key) return cached.items;
+    const items = await loadSearchItems(
+      async page => {
+        const { data } = await vaultApi.list({
+          ...buildVaultListParams(view, page), page_size: 100, include_encrypted_data: true,
+        }, signal);
+        return data;
+      },
+      encrypted => decryptData(encrypted, key), signal,
+    );
+    signal.throwIfAborted();
+    if (useAuthStore.getState().cryptoKey !== key) throw new DOMException('Vault locked', 'AbortError');
+    searchIndexRef.current = { viewKey, key, items };
+    return items;
   }, []);
 
   const runSearch = useCallback(async (
@@ -183,23 +190,36 @@ export function useVaultViews({ isAuthenticated, isVaultLocked, setVaultItems, c
     searchAbortRef.current?.abort();
     const controller = new AbortController();
     searchAbortRef.current = controller;
+    const requestId = ++listRequestIdRef.current;
+    const key = useAuthStore.getState().cryptoKey;
+    if (!key) return;
+    if (!preserveSelection) clearSelection();
+    setListLoading(true);
+    setSearchError(null);
     try {
-      await loadVaultPage(requestedPage, view, preserveSelection, term, controller.signal);
+      const items = await getSearchItems(view, key, controller.signal);
+      if (requestId !== listRequestIdRef.current || controller.signal.aborted) return;
+      const matches = sortByUpdatedDesc(items.filter(item => itemMatchesSearch(item, term)));
+      applyResolvedView(paginateItems(matches, requestedPage), preserveSelection);
     } catch (err: unknown) {
       const error = err as { code?: string; name?: string };
-      if (!controller.signal.aborted && error?.code !== 'ERR_CANCELED' && error?.name !== 'AbortError') {
-        console.error('Search error:', err);
-        toastService.error(getSessionAwareError(err, 'Search is temporarily unavailable'));
-      }
+      if (controller.signal.aborted || requestId !== listRequestIdRef.current ||
+          error?.code === 'ERR_CANCELED' || error?.name === 'AbortError') return;
+      console.error('Search error:', err);
+      const message = getSessionAwareError(err, 'The search could not finish. Try again or clear your search.');
+      setSearchError(message);
+      toastService.error(message);
+    } finally {
+      if (requestId === listRequestIdRef.current) setListLoading(false);
     }
-  }, [getCurrentView, loadVaultPage]);
+  }, [applyResolvedView, clearSelection, getCurrentView, getSearchItems]);
 
   const queueSearch = useCallback((value: string) => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchAbortRef.current?.abort();
     listRequestIdRef.current += 1;
-    if (!normalItemsRef.current) normalItemsRef.current = useAuthStore.getState().vaultItems;
     setSearch(value);
+    setSearchError(null);
     setVaultItems([]);
     setPage(1);
     setTotalPages(0);
@@ -250,6 +270,6 @@ export function useVaultViews({ isAuthenticated, isVaultLocked, setVaultItems, c
     listLoading, page, setPage, totalPages, setTotalPages, totalItems, setTotalItems,
     sidebarCounts, setSidebarCounts, getCurrentView, setCachedView, cacheAllView,
     invalidateCachedViews, restoreCachedView, restoreOrHydrateView, loadVaultPage,
-    search, resetSearch, runSearch, queueSearch,
+    search, searchError, resetSearch, runSearch, queueSearch,
   };
 }
