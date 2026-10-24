@@ -1,13 +1,15 @@
 'use client';
 
+import type { DecryptedPayload } from './types';
+
 /**
  * crypto.ts — Client-side AES-256-GCM encryption using the Web Crypto API.
  *
  * Security model:
  * - User's master password → PBKDF2 (600k iterations, SHA-256) → 256-bit key
- * - The vault salt comes from the server (unique per user, never changes)
+ * - The vault salt comes from the server (unique per user, rotated on master password change)
  * - Each vault item is encrypted independently: AES-256-GCM with a fresh 12-byte IV
- * - The server stores only ciphertext — it cannot decrypt any vault data
+ * - Item contents are encrypted; names and organisational metadata are not
  * - The derived key lives only in memory; it's never persisted
  */
 
@@ -112,6 +114,14 @@ function bytesToHex(bytes: Uint8Array<ArrayBuffer>): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+export function withPasswordHistory(payload: DecryptedPayload, previous?: DecryptedPayload): DecryptedPayload {
+  if (!('password' in payload)) return payload;
+  const history = Array.isArray(previous?.password_history) ? previous.password_history : [];
+  const replaced = previous?.password && previous.password !== payload.password
+    ? [{ password: previous.password, replaced_at: new Date().toISOString() }, ...history] : history;
+  return { ...payload, password_history: replaced.slice(0, 5) };
+}
+
 // Password Generator
 export function generatePassword(options: {
   length: number;
@@ -121,17 +131,28 @@ export function generatePassword(options: {
   symbols: boolean;
 }): string {
   const { length, uppercase, lowercase, numbers, symbols } = options;
-  let charset = '';
-  if (uppercase) charset += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  if (lowercase) charset += 'abcdefghijklmnopqrstuvwxyz';
-  if (numbers) charset += '0123456789';
-  if (symbols) charset += '!@#$%^&*()_+-=[]{}|;:,.<>?';
-
-  if (!charset) charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-
-  const array = new Uint32Array(length);
-  crypto.getRandomValues(array);
-  return Array.from(array, (x) => charset[x % charset.length]).join('');
+  const groups = [
+    uppercase ? 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' : '',
+    lowercase ? 'abcdefghijklmnopqrstuvwxyz' : '',
+    numbers ? '0123456789' : '',
+    symbols ? '!@#$%^&*()_+-=[]{}|;:,.<>?' : '',
+  ].filter(Boolean);
+  if (!groups.length || !Number.isInteger(length) || length < 8 || length > 128) {
+    throw new RangeError('Choose a length from 8 to 128 and at least one character type');
+  }
+  const charset = groups.join('');
+  const random = new Uint32Array(1);
+  const limit = 2 ** 32 - (2 ** 32 % charset.length);
+  const randomCharacter = () => {
+    // Discard the uneven remainder so every character has equal probability.
+    do { crypto.getRandomValues(random); } while (random[0] >= limit);
+    return charset[random[0] % charset.length];
+  };
+  let password: string;
+  do {
+    password = Array.from({ length }, randomCharacter).join('');
+  } while (!groups.every(group => [...password].some(character => group.includes(character))));
+  return password;
 }
 
 // HIBP Pwned Passwords — k-anonymity model (SHA-1 prefix, never sends full hash)
@@ -166,28 +187,4 @@ export async function checkHIBP(password: string): Promise<number> {
   const count = line ? Number.parseInt(line.split(':')[1], 10) : 0;
   _hibpCache.set(hashHex, count);
   return count;
-}
-
-// Password Strength
-export function passwordStrength(password: string): {
-  score: number;
-  label: string;
-  color: string;
-} {
-  let score = 0;
-  if (password.length >= 8) score++;
-  if (password.length >= 16) score++;
-  if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score++;
-  if (/\d/.test(password)) score++;
-  if (/[^A-Za-z0-9]/.test(password)) score++;
-
-  const levels = [
-    { label: 'Very Weak', color: 'var(--danger)' },
-    { label: 'Weak', color: 'var(--strength-weak)' },
-    { label: 'Fair', color: 'var(--strength-fair)' },
-    { label: 'Strong', color: 'var(--strength-strong)' },
-    { label: 'Very Strong', color: 'var(--success)' },
-  ];
-
-  return { score, ...levels[Math.min(score, 4)] };
 }
