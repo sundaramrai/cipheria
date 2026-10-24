@@ -1,23 +1,33 @@
 # Cipheria
 
-Cipheria is a password manager with browser-side vault encryption. The API stores encrypted vault payloads and the metadata required to list them.
+Cipheria is a web vault for logins, payment cards, notes, and identities. The Next.js frontend encrypts item contents in the browser; the FastAPI backend stores ciphertext and the metadata used to list items.
 
-## Security boundary
+## Vault features
 
-- The browser derives a vault key from the master password with PBKDF2-SHA-256 (600,000 iterations) and encrypts vault payloads with AES-256-GCM.
-- The master password is not sent to the API. The API stores a bcrypt-hashed verifier, encrypted payloads, and unencrypted item metadata such as name, category, favourite state, and timestamps.
-- Access tokens last 15 minutes. Refresh tokens last 30 days, are rotated, and are stored hashed.
-- Losing the master password means encrypted vault data cannot be recovered.
+- Search saved names, login usernames, and website URLs across a category, Favourites, or Trash.
+- Generate passwords with length and character options; view a local strength estimate or explicitly check a password against known breaches.
+- Keep the last five replaced login passwords inside the item's encrypted history.
+- Lock the vault, sign out other browser sessions, or change the master password and re-encrypt existing items.
+- Download JSON exports containing encrypted item contents and readable listing metadata. There is currently no import/restore flow for export files.
+
+## Data and privacy
+
+- Item contents use AES-256-GCM with a key derived locally from the master password. The API receives a derived authentication verifier, not the raw master password.
+- Item names, categories, favourites, timestamps, and account details remain readable to the server.
+- Icons are local. Analytics and performance events are limited to the public landing page; auth and vault events are discarded.
+- The master password cannot be reset to recover encrypted contents. An older export still requires the password used when that export was made.
+
+The [architecture guide](docs/architecture.md) documents key derivation, session checks, data flows, cache behaviour, and the implementation files for each responsibility.
 
 ## Requirements
 
 - Node.js 22 and pnpm 10 (the versions used by the Docker image and lockfile)
 - Python 3.14 and [uv](https://docs.astral.sh/uv/)
-- Docker Desktop for the recommended local PostgreSQL and Redis services
+- Docker Desktop for local PostgreSQL and Redis services
 
 ## Run locally
 
-This is the recommended development mode: PostgreSQL and Redis run in Docker; FastAPI and Next.js run on the host with hot reload.
+The commands below run PostgreSQL and Redis in Docker, with FastAPI and Next.js on the host for hot reload.
 
 ### 1. Configure the API
 
@@ -32,7 +42,7 @@ JWT_SECRET=replace-with-a-long-random-secret
 ALLOWED_ORIGINS=http://localhost:3000
 ```
 
-`127.0.0.1` is intentional. The Compose services bind to IPv4 loopback; using `localhost` can cause a slow IPv6 fallback on Windows.
+The addresses match the IPv4 loopback bindings in `docker-compose.dev.yml`.
 
 SMTP is optional. Add these only when testing email verification:
 
@@ -43,6 +53,7 @@ SMTP_USERNAME=your-user
 SMTP_PASSWORD=your-password
 SMTP_FROM=no-reply@example.com
 SMTP_STARTTLS=true
+APP_BASE_URL=http://localhost:3000
 ```
 
 Create `.env.local` at the repository root so the Next.js development server proxies browser requests to FastAPI:
@@ -61,6 +72,8 @@ PostgreSQL is exposed only at `127.0.0.1:5434`; Redis is exposed only at `127.0.
 
 ### 3. Install dependencies and migrate
 
+From the repository root:
+
 ```bash
 pnpm install
 cd api
@@ -70,10 +83,9 @@ uv run alembic -c ../alembic.ini upgrade head
 
 ### 4. Run the API
 
-Keep this terminal open:
+Continue in the `api` directory from step 3 and keep this terminal open:
 
 ```bash
-cd api
 uv run uvicorn index:app --reload --port 8000
 ```
 
@@ -93,7 +105,7 @@ On Windows systems where PowerShell blocks `pnpm.ps1`, use `pnpm.cmd` in place o
 
 ## Full Docker development stack
 
-To run the UI and API in containers too:
+From the repository root, run the UI and API in containers too:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
@@ -123,20 +135,25 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
 | `ENVIRONMENT=production` | Yes | Enables production behavior and hides API docs |
 | `REDIS_URL` | Recommended | Cache and shared rate-limit storage |
 | `SMTP_*` | Optional | Email verification delivery |
+| `APP_BASE_URL` | With email verification | Public frontend URL used in verification links |
 
 The repository's `vercel.json` defines a Vercel Services deployment: Next.js serves `/` and FastAPI serves `/api/*`. Do not set `NEXT_PUBLIC_API_URL` there; the browser should use the same origin. Vercel project settings must use the repository root and the `Services` framework preset.
 
-The `Dockerfile` and `api/Dockerfile` build separate production UI and API images. They are not the local Compose runtime. Inject deployment configuration at runtime; do not copy `api/.env` into an image.
+The `Dockerfile` and `api/Dockerfile` build separate production UI and API images. Set `INTERNAL_API_ORIGIN` as a frontend build argument when the production UI image must proxy requests to the API; Next.js generates those rewrites during the build. Supply API secrets at runtime. The production API container starts Uvicorn without running migrations, so apply Alembic migrations as a separate deployment step.
 
 ## Development checks
+
+From the repository root:
 
 ```bash
 pnpm lint
 pnpm typecheck
 pnpm build
+pnpm test
 
 cd api
 uv run ruff check .
+uv run python -m unittest discover -s tests -v
 ```
 
 ## Repository layout
@@ -147,6 +164,7 @@ components/          Dashboard and auth UI
 lib/                 Browser crypto and API client
 api/                 FastAPI application
 alembic/             PostgreSQL migrations
+docs/                Architecture and design documentation
 docker-compose*.yml  Local Docker infrastructure and development stack
 ```
 
