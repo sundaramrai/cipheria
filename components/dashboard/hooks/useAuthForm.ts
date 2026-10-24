@@ -5,7 +5,7 @@ import { toastService } from '@/lib/toast';
 import { parseApiError } from '@/lib/errors';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
-import { deriveKey, deriveMasterPasswordVerifier, generateSaltHex, passwordStrength } from '@/lib/crypto';
+import { deriveKey, deriveMasterPasswordVerifier, generateSaltHex } from '@/lib/crypto';
 
 type Tab = 'login' | 'register';
 
@@ -38,8 +38,6 @@ export function useAuthForm(initialTab: Tab = 'login') {
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [form, setForm] = useState<AuthForm>(EMPTY_FORM);
-
-    const strength = tab === 'register' ? passwordStrength(form.masterPassword) : null;
 
     const toggleTab = () => {
         setTab((t) => (t === 'login' ? 'register' : 'login'));
@@ -116,7 +114,6 @@ export function useAuthForm(initialTab: Tab = 'login') {
         form,
         handleChange,
         handleSubmit,
-        strength,
         submitLabel,
     };
 }
