@@ -1,7 +1,8 @@
 'use client';
 import React, { useState, useEffect, useCallback, useId, useRef } from 'react';
 import { Plus, Edit2, X, Eye, EyeOff, RefreshCw } from 'lucide-react';
-import { generatePassword, passwordStrength } from '@/lib/crypto';
+import { generatePassword } from '@/lib/crypto';
+import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter';
 import type { DecryptedPayload } from '@/lib/types';
 import { ITEM_CATEGORIES } from './types';
 import type { ItemForm } from './types';
@@ -19,7 +20,7 @@ export const ITEM_FIELDS = {
   phone: { label: 'Phone', copyLabel: 'Phone', id: 'form-phone', placeholder: '+1 555 000 0000' },
   address: { label: 'Address', id: 'form-address', placeholder: '123 Main St, City', multiline: true },
   notes: { label: 'Notes', multiline: true },
-} as const satisfies Record<keyof DecryptedPayload, { label: string; copyLabel?: string; id?: string; placeholder?: string; secret?: boolean; multiline?: boolean; style?: React.CSSProperties }>;
+} as const satisfies Record<Exclude<keyof DecryptedPayload, 'password_history'>, { label: string; copyLabel?: string; id?: string; placeholder?: string; secret?: boolean; multiline?: boolean; style?: React.CSSProperties }>;
 
 const PASSWORD_GENERATOR_OPTIONS = {
   length: 20,
@@ -80,9 +81,13 @@ export function Modal({ children, onClose, title, icon, closeDisabled = false }:
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const closeDisabledRef = useRef(closeDisabled);
+  const onCloseRef = useRef(onClose);
   const titleId = useId();
 
-  useEffect(() => { closeDisabledRef.current = closeDisabled; }, [closeDisabled]);
+  useEffect(() => {
+    closeDisabledRef.current = closeDisabled;
+    onCloseRef.current = onClose;
+  }, [closeDisabled, onClose]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -90,8 +95,8 @@ export function Modal({ children, onClose, title, icon, closeDisabled = false }:
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!dialog.open) dialog.showModal();
     titleRef.current?.focus();
-    const handleCancel = (e: Event) => { e.preventDefault(); if (!closeDisabledRef.current) onClose(); };
-    const handleBackdropClick = (e: MouseEvent) => { if (e.target === dialog && !closeDisabledRef.current) onClose(); };
+    const handleCancel = (e: Event) => { e.preventDefault(); if (!closeDisabledRef.current) onCloseRef.current(); };
+    const handleBackdropClick = (e: MouseEvent) => { if (e.target === dialog && !closeDisabledRef.current) onCloseRef.current(); };
     dialog.addEventListener('cancel', handleCancel);
     dialog.addEventListener('click', handleBackdropClick);
     return () => {
@@ -100,7 +105,7 @@ export function Modal({ children, onClose, title, icon, closeDisabled = false }:
       if (dialog.open) dialog.close();
       if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <dialog ref={dialogRef} aria-labelledby={titleId} className="modal-dialog" style={{
@@ -171,36 +176,16 @@ export function Modal({ children, onClose, title, icon, closeDisabled = false }:
   );
 }
 
-/* Password strength bar */
-function StrengthBar({ password }: Readonly<{ password: string }>) {
-  const s = password ? passwordStrength(password) : null;
-  if (!s) return null;
-  return (
-    <div style={{ marginTop: 8 }}>
-      <div style={{ display: 'flex', gap: 3, marginBottom: 5 }}>
-        {[0, 1, 2, 3, 4].map(i => (
-          <div key={i} style={{
-            height: 2, flex: 1, borderRadius: 2,
-            background: i <= s.score ? s.color : 'var(--skeleton-2)',
-            transition: 'background 0.3s',
-          }} />
-        ))}
-      </div>
-      <span style={{ fontSize: '0.7rem', color: s.color, fontWeight: 500 }}>{s.label}</span>
-    </div>
-  );
-}
-
-function useFormField<T extends ItemForm>(form: T, setForm: (f: T) => void) {
+function useFormField(form: ItemForm, setForm: (f: ItemForm) => void) {
   return useCallback(
-    (key: keyof T) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    (key: keyof ItemForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm({ ...form, [key]: e.target.value }),
     [form, setForm],
   );
 }
 
 function FormInput({ name, form, onChange }: Readonly<{
-  name: Exclude<keyof DecryptedPayload, 'password' | 'notes'>;
+  name: Exclude<keyof DecryptedPayload, 'password' | 'notes' | 'password_history'>;
   form: ItemForm;
   onChange: (key: keyof ItemForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
 }>) {
@@ -219,9 +204,17 @@ function FormInput({ name, form, onChange }: Readonly<{
 /* Login form fields */
 function LoginFormFields({ form, setForm }: Readonly<{ form: ItemForm; setForm: (f: ItemForm) => void }>) {
   const [showPw, setShowPw] = useState(false);
+  const [generatorLength, setGeneratorLength] = useState<number>(PASSWORD_GENERATOR_OPTIONS.length);
+  const [useSymbols, setUseSymbols] = useState(true);
+  const [replacement, setReplacement] = useState<{ previous: string; generated: string } | null>(null);
+  const generatorId = useId();
   const field = useFormField(form, setForm);
   const toggleShow = useCallback(() => setShowPw(v => !v), []);
-  const generatePw = useCallback(() => setForm({ ...form, password: generatePassword(PASSWORD_GENERATOR_OPTIONS) }), [form, setForm]);
+  const generatePw = useCallback(() => {
+    const generated = generatePassword({ ...PASSWORD_GENERATOR_OPTIONS, length: generatorLength, symbols: useSymbols });
+    setReplacement({ previous: form.password, generated });
+    setForm({ ...form, password: generated });
+  }, [form, generatorLength, setForm, useSymbols]);
 
   return (
     <>
@@ -238,7 +231,7 @@ function LoginFormFields({ form, setForm }: Readonly<{ form: ItemForm; setForm: 
               value={form.password} onChange={field('password')}
               style={{ paddingRight: 42, fontFamily: showPw ? 'inherit' : 'var(--font-mono)' }}
             />
-            <button type="button" onClick={toggleShow} style={{
+            <button type="button" onClick={toggleShow} aria-label={showPw ? 'Hide password' : 'Reveal password'} style={{
               position: 'absolute', right: 0, top: 0, bottom: 0, width: 42,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: 'none', border: 'none', cursor: 'pointer',
@@ -247,12 +240,38 @@ function LoginFormFields({ form, setForm }: Readonly<{ form: ItemForm; setForm: 
               {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
-          <button type="button" className="btn-ghost" onClick={generatePw} title="Generate password"
+          <button type="button" className="btn-ghost" onClick={generatePw} title="Generate password" aria-label="Generate password"
             style={{ padding: '0 13px', flexShrink: 0, minHeight: 44, display: 'flex', alignItems: 'center', gap: 5 }}>
             <RefreshCw size={13} />
           </button>
         </div>
-        <StrengthBar password={form.password} />
+        {replacement?.generated && form.password === replacement.generated && (
+          <div className="mt-2 flex items-center justify-between gap-3 text-xs text-(--text-secondary)">
+            <span>Generated {replacement.generated.length}-character password</span>
+            <button type="button" className="text-(--accent) underline underline-offset-4" onClick={() => {
+              setForm({ ...form, password: replacement.previous });
+              setReplacement(null);
+            }}>Undo replacement</button>
+          </div>
+        )}
+        <details className="mt-3 text-xs text-(--text-secondary)">
+          <summary className="cursor-pointer py-1">Generator options</summary>
+          <div className="mt-2 rounded-lg border border-(--border) p-3">
+            <div className="mb-2 flex justify-between gap-3">
+              <label htmlFor={`${generatorId}-length`}>Password length</label>
+              <output htmlFor={`${generatorId}-length`}>{generatorLength} characters</output>
+            </div>
+            <input id={`${generatorId}-length`} type="range" min={8} max={128} step={1}
+              className="w-full accent-(--accent)" value={generatorLength}
+              onChange={event => setGeneratorLength(Number(event.target.value))} />
+            <label className="mt-3 flex cursor-pointer items-center gap-2">
+              <input type="checkbox" className="accent-(--accent)" checked={useSymbols}
+                onChange={event => setUseSymbols(event.target.checked)} />Include symbols
+            </label>
+            <p className="mt-2 leading-5">Options apply the next time you generate a password.</p>
+          </div>
+        </details>
+        <PasswordStrengthMeter password={form.password} />
       </div>
     </>
   );
@@ -306,7 +325,7 @@ function ItemFormBody({ form, setForm, submitLabel, submitting, onClose }: Reado
       </div>
 
       <fieldset className="m-0 min-w-0 border-0 p-0">
-        <legend className="mb-2 text-[13px] font-semibold uppercase tracking-[0.05em] text-[var(--text-secondary)]">Category</legend>
+        <legend className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-(--text-secondary)">Category</legend>
         <CategoryPicker value={form.category} onChange={handleCategoryChange} />
       </fieldset>
 
@@ -351,30 +370,50 @@ const MODAL_CONFIG = {
   edit: { title: 'Edit Item', submitLabel: 'Save Changes', icon: <Edit2 size={14} color="var(--accent)" /> },
 } as const;
 
-function ItemModal({ form, setForm, saving, onSubmit, onClose, mode }: Readonly<ItemModalProps>) {
+export function ItemModal({ form, setForm, saving, onSubmit, onClose, mode }: Readonly<ItemModalProps>) {
   const { title, submitLabel, icon } = MODAL_CONFIG[mode];
+  const [initialForm] = useState(() => ({ ...form }));
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const dirty = (Object.keys(initialForm) as (keyof ItemForm)[]).some(key => form[key] !== initialForm[key]);
+  const requestClose = useCallback(() => {
+    if (saving) return;
+    if (dirty) setConfirmDiscard(true);
+    else onClose();
+  }, [dirty, onClose, saving]);
+  const keepEditing = useCallback(() => setConfirmDiscard(false), []);
+  const discardChanges = useCallback(() => {
+    setForm({ ...initialForm });
+    onClose();
+  }, [initialForm, onClose, setForm]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [dirty]);
+
   return (
-    <Modal onClose={onClose} title={title} icon={icon}>
-      <form onSubmit={onSubmit} autoComplete="off">
-        <ItemFormBody
-          form={form} setForm={setForm}
-          submitLabel={submitLabel} submitting={saving} onClose={onClose}
-        />
-      </form>
-    </Modal>
+    <>
+      <Modal onClose={requestClose} title={title} icon={icon} closeDisabled={saving}>
+        <form onSubmit={onSubmit} autoComplete="off">
+          <fieldset disabled={saving} className="m-0 min-w-0 border-0 p-0">
+            <ItemFormBody
+              form={form} setForm={setForm}
+              submitLabel={submitLabel} submitting={saving} onClose={requestClose}
+            />
+          </fieldset>
+        </form>
+      </Modal>
+      {confirmDiscard && (
+        <Modal onClose={keepEditing} title="Discard your changes?">
+          <p className="text-sm leading-6 text-(--text-secondary)">Your changes have not been saved.</p>
+          <div className="mt-6 flex justify-end gap-3">
+            <button type="button" className="btn-ghost" onClick={keepEditing}>Keep editing</button>
+            <button type="button" className="btn-ghost btn-danger" onClick={discardChanges}>Discard changes</button>
+          </div>
+        </Modal>
+      )}
+    </>
   );
-}
-
-export function AddItemModal({ newItem, setNewItem, savingItem, onSubmit, onClose }: Readonly<{
-  newItem: ItemForm; setNewItem: (f: ItemForm) => void; savingItem: boolean;
-  onSubmit: (e: React.SyntheticEvent) => void; onClose: () => void;
-}>) {
-  return <ItemModal mode="add" form={newItem} setForm={setNewItem} saving={savingItem} onSubmit={onSubmit} onClose={onClose} />;
-}
-
-export function EditItemModal({ editForm, setEditForm, updatingItem, onSubmit, onClose }: Readonly<{
-  editForm: ItemForm; setEditForm: (f: ItemForm) => void; updatingItem: boolean;
-  onSubmit: (e: React.SyntheticEvent) => void; onClose: () => void;
-}>) {
-  return <ItemModal mode="edit" form={editForm} setForm={setEditForm} saving={updatingItem} onSubmit={onSubmit} onClose={onClose} />;
 }
