@@ -66,6 +66,7 @@ app = FastAPI(
     title="Cipheria API",
     description="Cipheria account sessions and storage for browser-encrypted vault payloads",
     version="1.0.0",
+    root_path="/api" if os.getenv("VERCEL") == "1" else "",
     docs_url=None if IS_PROD else "/docs",
     redoc_url=None if IS_PROD else "/redoc",
     openapi_url=None if IS_PROD else "/openapi.json",
@@ -89,9 +90,8 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
-# The Vercel Services config mounts this app under /api in production.
-# Keep the FastAPI app itself rooted at / so local dev remains simple and
-# external routing can add /api without double-prefixing.
+# Vercel forwards /api unchanged. root_path handles that public prefix while
+# keeping the router paths usable directly by local Uvicorn and Docker.
 app.include_router(auth_router)
 app.include_router(vault_router)
 
