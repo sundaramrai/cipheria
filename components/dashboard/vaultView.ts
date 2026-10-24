@@ -1,6 +1,7 @@
 import { vaultApi } from '@/lib/api';
 import type { SidebarCounts, VaultItem } from '@/lib/types';
 import type { Category } from './types';
+import { itemMatchesSearch } from '@/lib/vaultSearch';
 
 export const PAGE_SIZE = 50;
 
@@ -41,20 +42,19 @@ export function getViewCacheKey(view: ViewRequest): CachedViewKey | `category:${
   return view.category === 'all' ? 'all' : `category:${view.category}`;
 }
 
-export function buildVaultListParams(view: ViewRequest, page: number, search?: string) {
+export function buildVaultListParams(view: ViewRequest, page: number) {
   return {
     deleted_only: view.deletedOnly,
     favourites_only: !view.deletedOnly && view.favouritesOnly,
     page,
     page_size: PAGE_SIZE,
-    ...(search !== undefined && { search }),
     ...(!view.deletedOnly && !view.favouritesOnly && view.category !== 'all' && { category: view.category }),
   };
 }
 
-export async function requestVaultPage(view: ViewRequest, page: number, search?: string, signal?: AbortSignal) {
+export async function requestVaultPage(view: ViewRequest, page: number) {
   while (true) {
-    const { data } = await vaultApi.list(buildVaultListParams(view, page, search), signal);
+    const { data } = await vaultApi.list(buildVaultListParams(view, page));
     if (data.total_pages > 0 && page > data.total_pages) {
       page = data.total_pages;
       continue;
@@ -69,7 +69,8 @@ export function rehydrateListItem(item: VaultItem, storeItems: VaultItem[]): Vau
 }
 
 export function sortByUpdatedDesc(items: VaultItem[]): VaultItem[] {
-  return [...items].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+  return [...items].sort((a, b) =>
+    Date.parse(b.updated_at) - Date.parse(a.updated_at) || a.id.localeCompare(b.id));
 }
 
 export function itemMatchesView(item: VaultItem, view: ViewRequest): boolean {
@@ -77,11 +78,6 @@ export function itemMatchesView(item: VaultItem, view: ViewRequest): boolean {
   if (item.is_deleted) return false;
   if (view.favouritesOnly && !item.is_favourite) return false;
   return view.category === 'all' || item.category === view.category;
-}
-
-export function itemMatchesSearch(item: VaultItem, term: string): boolean {
-  if (!term) return true;
-  return item.name.toLowerCase().includes(term.toLowerCase());
 }
 
 export function reconcileVisibleItems(
@@ -113,6 +109,12 @@ export function computeTotalPages(totalItems: number): number {
 
 export function clampPage(page: number, totalPages: number): number {
   return Math.min(page, Math.max(1, totalPages));
+}
+
+export function paginateItems(items: VaultItem[], requestedPage = 1): CachedViewState {
+  const totalPages = computeTotalPages(items.length);
+  const page = clampPage(requestedPage, totalPages);
+  return { items: items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), page, totalPages, totalItems: items.length };
 }
 
 export function getMatchDelta(
