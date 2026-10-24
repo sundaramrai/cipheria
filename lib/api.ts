@@ -1,7 +1,8 @@
 import axios from 'axios';
+import { emitAuthEvent } from '@/lib/authSync';
 import type { AuthSession, PaginatedVaultItems, UserProfile, VaultItem } from '@/lib/types';
 
-// In-memory access token — never touches Web Storage, invisible to XSS
+// Access tokens live in memory and are never persisted to Web Storage.
 let _accessToken: string | null = null;
 export const setAccessToken = (token: string | null) => { _accessToken = token; };
 export const getAccessToken = () => _accessToken;
@@ -69,9 +70,11 @@ api.interceptors.response.use(
         original.headers = original.headers ?? {};
         original.headers.Authorization = `Bearer ${newToken}`;
         return api(original);
-      } catch {
-        // Refresh failed — clear token; callers handle redirect
+      } catch (refreshError) {
         setAccessToken(null);
+        if (axios.isAxiosError(refreshError) && refreshError.response?.status === 401) {
+          emitAuthEvent('logout', undefined, true);
+        }
       }
     }
     throw error;
@@ -107,6 +110,11 @@ export const authApi = {
   logout: () =>
     api.post('/api/auth/logout'),
 
+  revokeOtherSessions: (masterPasswordVerifier: string) =>
+    api.post<{ message: string }>('/api/auth/sessions/revoke-others', {
+      master_password_verifier: masterPasswordVerifier,
+    }),
+
   me: () => api.get<UserProfile>('/api/auth/me'),
 
   requestEmailVerification: () =>
@@ -138,7 +146,7 @@ export const authApi = {
 // Vault
 
 export const vaultApi = {
-  list: (params?: { category?: string; search?: string; favourites_only?: boolean; deleted_only?: boolean; page?: number; page_size?: number }, signal?: AbortSignal) =>
+  list: (params?: { category?: string; search?: string; favourites_only?: boolean; deleted_only?: boolean; page?: number; page_size?: number; include_encrypted_data?: boolean }, signal?: AbortSignal) =>
     api.get<PaginatedVaultItems<VaultItem>>('/api/vault', { params, signal }),
 
   get: (id: string) => api.get<VaultItem>(`/api/vault/${id}`),
@@ -147,7 +155,6 @@ export const vaultApi = {
     name: string;
     category: string;
     encrypted_data: string;
-    favicon_url?: string;
     is_favourite?: boolean;
   }) => api.post<VaultItem>('/api/vault', data),
 
@@ -155,7 +162,6 @@ export const vaultApi = {
     name: string;
     category: string;
     encrypted_data: string;
-    favicon_url: string;
     is_favourite: boolean;
   }>) => api.patch<VaultItem>(`/api/vault/${id}`, data),
 
