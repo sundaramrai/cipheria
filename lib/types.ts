@@ -10,6 +10,7 @@ export interface DecryptedPayload {
     // Login
     username?: string;
     password?: string;
+    password_history?: Array<{ password: string; replaced_at: string }>;
     url?: string;
     // Card
     cardNumber?: string;
@@ -29,9 +30,8 @@ export interface VaultItem {
     id: string;
     name: string;
     category: string;
-    /** Only present after fetching the detail endpoint */
+    /** Present in detail responses and encrypted batches for local search. */
     encrypted_data?: string;
-    favicon_url?: string;
     is_favourite: boolean;
     is_deleted?: boolean;
     deleted_at?: string | null;
@@ -39,6 +39,8 @@ export interface VaultItem {
     updated_at: string;
     /** Populated client-side after decryption */
     decrypted?: DecryptedPayload;
+    /** Browser-only search index; cleared on lock and never sent to the API. */
+    search_fields?: { username: string; url: string };
 }
 
 export interface UserProfile {
