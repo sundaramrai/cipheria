@@ -1,16 +1,12 @@
 """
-deps.py - FastAPI dependency providers with Redis cache integration.
-
-get_current_user_from_db checks Redis before hitting the DB:
-  Cache HIT  -> returns a CachedUser model
-  Cache MISS -> hits the DB, caches the result, and returns a User ORM object
-
-Routes that need to write to the DB should declare DBUser, which always
-hits the DB and returns a real SQLAlchemy User instance.
+JWT-bound session validation and user dependencies for Cipheria's API routes.
+Session validation reads PostgreSQL before any cached profile is returned.
+DBUser loads an active User ORM object for routes that modify account data.
 """
 
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -20,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from cache import get_cached_user, set_cached_user
 from crypto import decode_token
-from database import User, get_db
+from database import RefreshToken, User, get_db
 from user_cache import CachedUser, deserialize_cached_user, serialize_cached_user
 
 logger = logging.getLogger(__name__)
@@ -37,15 +33,17 @@ def auth_exception() -> HTTPException:
 
 
 class TokenUser:
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: str, session_id: str):
         try:
             self.id = uuid.UUID(user_id)
-        except ValueError:
+            self.session_id = uuid.UUID(session_id)
+        except (ValueError, TypeError, AttributeError):
             raise auth_exception()
 
 
 def get_current_token_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> TokenUser:
     if credentials is None:
         raise auth_exception()
@@ -56,7 +54,17 @@ def get_current_token_user(
         user_id: str | None = payload.get("sub")
         if not user_id:
             raise auth_exception()
-        return TokenUser(user_id)
+        subject = TokenUser(user_id, payload.get("sid"))
+        session = db.query(RefreshToken.id).join(User, User.id == RefreshToken.user_id).filter(
+            RefreshToken.id == subject.session_id,
+            RefreshToken.user_id == subject.id,
+            RefreshToken.revoked.is_(False),
+            RefreshToken.expires_at > datetime.now(UTC),
+            User.is_active.is_(True),
+        ).first()
+        if not session:
+            raise auth_exception()
+        return subject
     except InvalidTokenError:
         raise auth_exception()
 
