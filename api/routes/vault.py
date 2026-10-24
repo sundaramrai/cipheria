@@ -27,10 +27,10 @@ from schemas import (
     PaginatedVaultResponse,
     VaultItemCreate,
     VaultItemResponse,
+    VaultItemSummary,
     VaultItemUpdate,
 )
 from vault_counts import get_cached_sidebar_counts_for_user
-from vault_serializers import serialize_vault_item
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +39,6 @@ router = APIRouter(prefix="/vault", tags=["vault"])
 ITEM_NOT_FOUND_MSG = "Item not found"
 MAX_PAGE_SIZE = 100
 VAULT_ITEM_LIMIT = 1000
-
-
-def _sanitise_search(search: str) -> str:
-    return search.replace("\\", "").replace("%", "").replace("_", "")
 
 
 @router.get("/export/json")
@@ -72,7 +68,6 @@ def export_vault(
                 "name": item.name,
                 "category": item.category,
                 "encrypted_data": item.encrypted_data,
-                "favicon_url": item.favicon_url,
                 "is_favourite": item.is_favourite,
                 "created_at": item.created_at.isoformat(),
             }
@@ -91,17 +86,20 @@ def list_items(
     deleted_only: Annotated[bool, Query()] = False,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 50,
+    include_encrypted_data: Annotated[bool, Query()] = False,
 ):
     user_id = str(current_user.id)
-    clean_search = _sanitise_search(search) if search else None
+    clean_search = search or None
+    cacheable = not (clean_search or include_encrypted_data)
 
-    if not clean_search:
+    cached = None
+    if cacheable:
         cached = get_cached_vault_list(
             user_id, category, clean_search, favourites_only, deleted_only, page, page_size
         )
-        if cached is not None:
-            logger.debug("vault:list cache HIT user=%s", user_id)
-            return cached
+    if cached is not None:
+        logger.debug("vault:list cache HIT user=%s", user_id)
+        return cached
 
     logger.debug("vault:list cache MISS user=%s", user_id)
 
@@ -112,7 +110,7 @@ def list_items(
     if category:
         filters.append(VaultItem.category == category)
     if clean_search:
-        filters.append(VaultItem.name.ilike(f"%{clean_search}%"))
+        filters.append(VaultItem.name.icontains(clean_search, autoescape=True))
     if favourites_only:
         filters.append(VaultItem.is_favourite.is_(True))
 
@@ -121,16 +119,16 @@ def list_items(
             VaultItem.id,
             VaultItem.name,
             VaultItem.category,
-            VaultItem.favicon_url,
             VaultItem.is_favourite,
             VaultItem.is_deleted,
             VaultItem.deleted_at,
             VaultItem.created_at,
             VaultItem.updated_at,
             func.count(VaultItem.id).over().label("total_count"),
+            *([VaultItem.encrypted_data] if include_encrypted_data else []),
         )
         .filter(*filters)
-        .order_by(VaultItem.updated_at.desc())
+        .order_by(VaultItem.updated_at.desc(), VaultItem.id.asc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -147,16 +145,17 @@ def list_items(
             .scalar()
         ) or 0
 
+    item_model = VaultItemResponse if include_encrypted_data else VaultItemSummary
     result = {
-        "items": [serialize_vault_item(row, include_encrypted_data=False) for row in rows],
+        "items": [item_model.model_validate(row).model_dump(mode="json") for row in rows],
         "total": total,
         "page": page,
         "page_size": page_size,
-        "total_pages": -(-total // page_size) if total else 0,
+        "total_pages": -(-total // page_size),
         "sidebar_counts": None if clean_search else get_cached_sidebar_counts_for_user(db, current_user.id),
     }
 
-    if not clean_search:
+    if cacheable:
         set_cached_vault_list(
             user_id, category, clean_search, favourites_only, deleted_only, page, page_size, result
         )
@@ -191,7 +190,7 @@ def get_item(
     if not item:
         raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
 
-    data = serialize_vault_item(item, include_encrypted_data=True)
+    data = VaultItemResponse.model_validate(item).model_dump(mode="json")
     set_cached_vault_item(user_id, item_key, data)
     return data
 
@@ -224,7 +223,6 @@ def create_item(
         name=body.name,
         category=body.category,
         encrypted_data=body.encrypted_data,
-        favicon_url=body.favicon_url,
         is_favourite=body.is_favourite,
     )
     db.add(item)
@@ -234,7 +232,7 @@ def create_item(
     invalidate_vault_list(user_id)
     logger.debug("vault:list cache busted (create) user=%s", user_id)
 
-    data = serialize_vault_item(item, include_encrypted_data=True)
+    data = VaultItemResponse.model_validate(item).model_dump(mode="json")
     set_cached_vault_item(user_id, str(item.id), data)
     return data
 
@@ -261,8 +259,16 @@ def update_item(
     if not item:
         raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
 
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(item, field, value)
+    updates = body.model_dump(exclude_unset=True)
+    if set(updates) == {"is_favourite"}:
+        # Explicitly preserve the content timestamp instead of running onupdate.
+        db.query(VaultItem).filter(VaultItem.id == item.id).update(
+            {VaultItem.is_favourite: updates["is_favourite"], VaultItem.updated_at: VaultItem.updated_at},
+            synchronize_session=False,
+        )
+    else:
+        for field, value in updates.items():
+            setattr(item, field, value)
     db.commit()
     db.refresh(item)
 
@@ -270,7 +276,7 @@ def update_item(
     invalidate_vault_list(user_id)
     logger.debug("vault cache busted (update) user=%s item=%s", user_id, item_key)
 
-    data = serialize_vault_item(item, include_encrypted_data=True)
+    data = VaultItemResponse.model_validate(item).model_dump(mode="json")
     set_cached_vault_item(user_id, item_key, data)
     return data
 
@@ -345,7 +351,7 @@ def restore_item(
 
     invalidate_vault_item(user_id, item_key)
     invalidate_vault_list(user_id)
-    data = serialize_vault_item(item, include_encrypted_data=True)
+    data = VaultItemResponse.model_validate(item).model_dump(mode="json")
     set_cached_vault_item(user_id, item_key, data)
     return data
 
