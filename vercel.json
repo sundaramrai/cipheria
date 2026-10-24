@@ -8,19 +8,7 @@
     "api": {
       "root": "api",
       "entrypoint": "index:app",
-      "framework": "fastapi",
-      "routes": [
-        {
-          "src": "^/api(?:/(.*))?$",
-          "transforms": [
-            {
-              "type": "request.path",
-              "op": "set",
-              "args": "/$1"
-            }
-          ]
-        }
-      ]
+      "framework": "fastapi"
     }
   },
   "rewrites": [
