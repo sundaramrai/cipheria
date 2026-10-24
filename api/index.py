@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Cipheria API",
-    description="Secure serverless password manager backend",
+    description="Cipheria account sessions and storage for browser-encrypted vault payloads",
     version="1.0.0",
     docs_url=None if IS_PROD else "/docs",
     redoc_url=None if IS_PROD else "/redoc",
