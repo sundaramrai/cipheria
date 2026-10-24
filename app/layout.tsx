@@ -4,8 +4,6 @@ import '../styles/globals.css';
 import { Toaster } from 'react-hot-toast';
 import { ThemeSync } from '@/components/ThemeSync';
 import { THEME_STORAGE_KEY } from '@/lib/theme';
-import { Analytics } from '@vercel/analytics/next';
-import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const cormorant = Cormorant_Garamond({
   subsets: ['latin'],
@@ -31,7 +29,7 @@ const outfit = Outfit({
 
 export const metadata: Metadata = {
   title: 'Cipheria — Secure Password Manager',
-  description: 'Zero-knowledge encrypted password vault. Your secrets, forever yours.',
+  description: 'Store logins, cards, notes and identities in Cipheria with browser-encrypted item contents.',
   icons: [
     { rel: 'icon', type: 'image/svg+xml', url: '/favicon.svg' },
     { rel: 'shortcut icon', url: '/favicon.svg' },
@@ -86,8 +84,6 @@ export default function RootLayout({ children }: { readonly children: React.Reac
             error: { iconTheme: { primary: 'var(--danger)', secondary: 'var(--status-ink)' } },
           }}
         />
-        <Analytics />
-        <SpeedInsights />
       </body>
     </html>
   );
