@@ -133,14 +133,14 @@ sequenceDiagram
     alt Access token expired
         API-->>Browser: 401
         Browser->>API: Refresh using HttpOnly cookie
-        API->>DB: Validate hash; conditionally replace hash and expiry
+        API->>DB: Validate hash and conditionally replace hash and expiry
         DB-->>API: Rotation succeeds for one caller
         API-->>Browser: New access JWT and refresh cookie
         Browser->>API: Retry original request once
     else JWT valid
         API->>DB: Check active account and unrevoked, unexpired session
         DB-->>API: Session state
-        API-->>Browser: Protected response if authorised; otherwise 401
+        API-->>Browser: Protected response if authorised, otherwise 401
     end
 ```
 
