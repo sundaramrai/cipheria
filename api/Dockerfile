@@ -6,7 +6,7 @@ ENV UV_LINK_MODE=copy
 
 WORKDIR /app/api
 
-RUN pip install --no-cache-dir uv
+RUN pip install --no-cache-dir uv==0.13.5
 
 FROM base AS dev
 
