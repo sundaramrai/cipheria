@@ -7,6 +7,7 @@ import { useAuthForm } from '@/components/dashboard/hooks/useAuthForm';
 import { authApi } from '@/lib/api';
 import { parseApiError } from '@/lib/errors';
 import { emitAuthEvent } from '@/lib/authSync';
+import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter';
 
 const GLOW_STYLE = {
   position: 'fixed' as const,
@@ -124,7 +125,7 @@ function ResetNotSupportedView() {
     <AuthShell title="Reset Not Supported" centered>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
         <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: 280 }}>
-          Cipheria now uses a single zero-knowledge master password. Lost master passwords cannot be reset.
+          Your master password encrypts vault contents in your browser. Lost master passwords cannot be reset.
         </p>
         <button type="button" className="btn-primary" onClick={() => router.replace('/auth')} style={{ width: '100%' }}>
           Back to Sign In
@@ -139,7 +140,7 @@ function AuthForm({ initialTab }: Readonly<{ initialTab: 'login' | 'register' }>
     tab, setTab, toggleTab,
     showPassword, togglePassword,
     loading, form, handleChange,
-    handleSubmit, strength, submitLabel,
+    handleSubmit, submitLabel,
   } = useAuthForm(initialTab);
 
   return (
@@ -229,20 +230,7 @@ function AuthForm({ initialTab }: Readonly<{ initialTab: 'login' | 'register' }>
               </p>
             </div>
           )}
-          {strength && form.masterPassword && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-                {[0, 1, 2, 3, 4].map((i) => (
-                  <div key={i} style={{
-                    height: 3, flex: 1, borderRadius: 2,
-                    background: i <= strength.score ? strength.color : 'var(--skeleton-2)',
-                    transition: 'background 0.3s',
-                  }} />
-                ))}
-              </div>
-              <span style={{ fontSize: '0.75rem', color: strength.color }}>{strength.label}</span>
-            </div>
-          )}
+          {tab === 'register' && <PasswordStrengthMeter password={form.masterPassword} />}
         </div>
 
         {tab === 'register' && (
