@@ -1,12 +1,6 @@
 """
-crypto.py — Server-side cryptography utilities.
-
-Vault item data is encrypted client-side with AES-256-GCM using a key
-derived from the user's master password (PBKDF2-SHA256, 600k iterations).
-The server never sees plaintext vault content or decryption keys.
-
-Handles: password hashing (bcrypt), JWT creation/verification,
-and secure salt generation for client-side key derivation.
+Bcrypt hashing of client-derived verifiers, JWT signing, and token/salt generation.
+Vault payload encryption and decryption are implemented in lib/crypto.ts.
 """
 
 import hashlib
@@ -34,7 +28,7 @@ ALGORITHM = "HS256"
 # The client silently rotates via /auth/refresh using the HttpOnly cookie.
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 
-# Single source of truth — cache.py imports this to stay in sync
+# Used by auth routes for refresh JWT expiry, session expiry, and cookie lifetime.
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 
