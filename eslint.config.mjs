@@ -1,8 +1,9 @@
 import { defineConfig } from 'eslint/config';
 import js from '@eslint/js';
 import nextPlugin from '@next/eslint-plugin-next';
-import importPlugin from 'eslint-plugin-import';
-import jsxA11y from 'eslint-plugin-jsx-a11y';
+import { importX, createNodeResolver } from 'eslint-plugin-import-x';
+import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescript';
+import jsxA11y from '@htmlacademy/eslint-plugin-jsx-a11y';
 import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
@@ -24,18 +25,18 @@ export default defineConfig(
   ...tseslint.configs.recommended,
   {
     files: ['**/*.{js,mjs,cjs,ts,tsx}'],
-    plugins: importPlugin.flatConfigs.recommended.plugins,
+    plugins: importX.flatConfigs.recommended.plugins,
     settings: {
-      ...importPlugin.flatConfigs.typescript.settings,
-      'import/resolver': {
-        node: true,
-        typescript: true,
-      },
+      ...importX.flatConfigs.typescript.settings,
+      'import-x/resolver-next': [
+        createTypeScriptImportResolver(),
+        createNodeResolver(),
+      ],
     },
     rules: {
-      ...importPlugin.flatConfigs.recommended.rules,
-      ...importPlugin.flatConfigs.typescript.rules,
-      'import/no-named-as-default-member': 'off',
+      ...importX.flatConfigs.recommended.rules,
+      ...importX.flatConfigs.typescript.rules,
+      'import-x/no-named-as-default-member': 'off',
     },
   },
   {
