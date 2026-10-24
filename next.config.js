@@ -14,11 +14,6 @@ const nextConfig = {
   // Reduce production bundle size - skip inline source maps
   productionBrowserSourceMaps: false,
 
-  // Tree-shake known icon/UI packages at build time to reduce bundle and compile overhead
-  experimental: {
-    optimizePackageImports: ['lucide-react'],
-  },
-
   async rewrites() {
     if (!shouldProxyApi) return [];
 
