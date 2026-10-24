@@ -21,6 +21,15 @@ export function useDashboardSession() {
   useIdleTimer(isVaultLocked, handleLockVault);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+    // Discover remote revocation when returning to this browser. The API's
+    // existing refresh handler broadcasts logout only for a confirmed 401.
+    const checkSession = () => { void authApi.me().catch(() => {}); };
+    window.addEventListener('focus', checkSession);
+    return () => window.removeEventListener('focus', checkSession);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     let active = true;
 
     if (isAuthenticated) {
