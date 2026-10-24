@@ -5,7 +5,7 @@
 
 import { createElement } from 'react';
 import { Info } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { toast } from 'react-hot-toast';
 import { parseApiError } from '@/lib/errors';
 
 const infoToastIcon = createElement(Info, { size: 16, strokeWidth: 2.25 });
