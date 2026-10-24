@@ -25,6 +25,11 @@ The [architecture guide](docs/architecture.md) documents key derivation, session
 - Python 3.14 and [uv 0.13.5](https://docs.astral.sh/uv/) (also pinned in the API Dockerfile)
 - Docker Desktop for local PostgreSQL and Redis services
 
+Install the pnpm version pinned in `package.json`. The workspace sets `pmOnFail: ignore`
+to keep `pnpm-lock.yaml` in a single-document format that GitHub's dependency graph
+can read. This disables automatic pnpm version switching; dependency verification
+and security auditing remain enabled. See the [upstream compatibility issue](https://github.com/dependabot/dependabot-core/issues/15904).
+
 ## Run locally
 
 The commands below run PostgreSQL and Redis in Docker, with FastAPI and Next.js on the host for hot reload.
