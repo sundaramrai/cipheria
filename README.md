@@ -21,8 +21,8 @@ The [architecture guide](docs/architecture.md) documents key derivation, session
 
 ## Requirements
 
-- Node.js 22 and pnpm 10 (the versions used by the Docker image and lockfile)
-- Python 3.14 and [uv](https://docs.astral.sh/uv/)
+- Node.js 24 and pnpm 12.15.0 (pinned in `package.json`)
+- Python 3.14 and [uv 0.13.5](https://docs.astral.sh/uv/) (also pinned in the API Dockerfile)
 - Docker Desktop for local PostgreSQL and Redis services
 
 ## Run locally
@@ -142,6 +142,11 @@ The repository's `vercel.json` defines a Vercel Services deployment: Next.js ser
 The `Dockerfile` and `api/Dockerfile` build separate production UI and API images. Set `INTERNAL_API_ORIGIN` as a frontend build argument when the production UI image must proxy requests to the API; Next.js generates those rewrites during the build. Supply API secrets at runtime. The production API container starts Uvicorn without running migrations, so apply Alembic migrations as a separate deployment step.
 
 ## Development checks
+
+ESLint 10 uses `eslint-plugin-import-x` for import checks and
+`@htmlacademy/eslint-plugin-jsx-a11y` for the existing JSX accessibility rules.
+Both declare ESLint 10 support. The accessibility fork requires Node.js 24 or later.
+The frontend tests include lint regression cases for these checks and React Hooks.
 
 From the repository root:
 
