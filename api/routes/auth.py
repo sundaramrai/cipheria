@@ -3,7 +3,6 @@ routes/auth.py — Auth routes with Redis cache integration.
 """
 
 import logging
-import os
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -31,7 +30,15 @@ from crypto import (
     hash_refresh_token,
     verify_password,
 )
-from database import AuditLog, AuthToken, RefreshToken, User, VaultItem, get_db
+from database import (
+    AuditLog,
+    AuthToken,
+    RefreshToken,
+    User,
+    VaultImport,
+    VaultItem,
+    get_db,
+)
 from deps import CurrentSubject, DBUser, get_current_user_from_db
 from limiter import limiter
 from mailer import build_app_url, send_email
@@ -51,8 +58,10 @@ from schemas import (
     VerifyEmailResponse,
     VerifyMasterPasswordRequest,
 )
+from settings import is_production
 from user_cache import serialize_cached_user
 from vault_counts import get_cached_sidebar_counts_for_user
+from vault_writes import validate_v2_ciphertext
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +70,7 @@ INVALID_MASTER_PASSWORD = "Invalid master password"
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-IS_PROD = os.getenv("ENVIRONMENT", "production") == "production"
+IS_PROD = is_production()
 
 AUTH_COOKIE_PATH = "/"
 _RT_TTL_SECONDS = REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
@@ -76,7 +85,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         value=token,
         httponly=True,
         secure=IS_PROD,
-        samesite="none" if IS_PROD else "lax",  # none required for cross-origin
+        samesite="lax",
         max_age=_RT_TTL_SECONDS,
         path=AUTH_COOKIE_PATH,
     )
@@ -88,7 +97,7 @@ def _clear_refresh_cookie(response: Response) -> None:
         path=AUTH_COOKIE_PATH,
         httponly=True,
         secure=IS_PROD,
-        samesite="none" if IS_PROD else "lax",
+        samesite="lax",
     )
 
 
@@ -152,6 +161,7 @@ def _build_unlock_response(db: Session, user: User) -> UnlockedVaultResponse:
     rows = (
         db.query(
             VaultItem.id,
+            VaultItem.revision,
             VaultItem.name,
             VaultItem.category,
             VaultItem.encrypted_data,
@@ -252,6 +262,8 @@ def register(
 ):
     if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
+    if body.key_envelope and body.key_envelope.salt != body.vault_salt:
+        raise HTTPException(status_code=422, detail="Vault salt and key envelope differ")
 
     user = User(
         email=body.email,
@@ -259,6 +271,7 @@ def register(
         full_name=body.full_name,
         master_hint=body.master_hint,
         vault_salt=body.vault_salt,
+        key_envelope=body.key_envelope.model_dump(mode="json") if body.key_envelope else None,
     )
     db.add(user)
     db.flush()
@@ -297,7 +310,7 @@ def login_challenge(
 ):
     user = db.query(User).filter(User.email == body.email).first()
     vault_salt = user.vault_salt if user and user.is_active else generate_salt()
-    return LoginChallengeResponse(vault_salt=vault_salt)
+    return LoginChallengeResponse(vault_salt=vault_salt, version=2 if user and user.is_active and getattr(user, "key_envelope", None) else 1)
 
 @router.post(
     "/login",
@@ -352,7 +365,10 @@ def refresh(  # NOSONAR - token rotation flow is intentionally explicit on this 
 ):
     def _reject_refresh(detail: str) -> None:
         _clear_refresh_cookie(response)
-        raise HTTPException(status_code=401, detail=detail)
+        raise HTTPException(
+            status_code=401, detail=detail,
+            headers={"Set-Cookie": response.headers["set-cookie"]},
+        )
 
     if not refresh_token:
         _reject_refresh("No refresh token")
@@ -616,17 +632,37 @@ def change_master_password(
     current_user: DBUser,
     subject: CurrentSubject,
 ):
+    current_user = db.query(User).filter(
+        User.id == current_user.id, User.is_active.is_(True),
+    ).populate_existing().with_for_update().first()
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Account unavailable")
     if not _verify_master_password(current_user, body.current_master_password_verifier):
         raise HTTPException(status_code=401, detail=INVALID_MASTER_PASSWORD)
+    if body.new_vault_salt == current_user.vault_salt:
+        raise HTTPException(status_code=400, detail="A password change requires a new vault salt")
 
-    vault_items = (
+    next_envelope = body.key_envelope.model_dump(mode="json") if body.key_envelope else None
+    previous_envelope = current_user.key_envelope
+    if next_envelope and next_envelope["salt"] != body.new_vault_salt:
+        raise HTTPException(status_code=422, detail="Vault salt and key envelope differ")
+    if previous_envelope and not next_envelope:
+        raise HTTPException(status_code=409, detail="Reload Cipheria; this vault uses version 2 encryption")
+    if previous_envelope and next_envelope["vault_id"] != previous_envelope["vault_id"]:
+        raise HTTPException(status_code=422, detail="Vault identity cannot change")
+    rewrap_only = bool(previous_envelope and next_envelope["key_id"] == previous_envelope["key_id"])
+    if rewrap_only and body.items:
+        raise HTTPException(status_code=422, detail="Rewrapping a vault key must not replace item ciphertext")
+    vault_items = [] if rewrap_only else (
         db.query(VaultItem)
         .filter(VaultItem.user_id == current_user.id)
-        .all()
+        .populate_existing().with_for_update().all()
     )
     if (
-        len(vault_items) != len(body.items)
-        or {item.id for item in vault_items} != {update.id for update in body.items}
+        not rewrap_only and (
+            len(vault_items) != len(body.items)
+            or {item.id for item in vault_items} != {update.id for update in body.items}
+        )
     ):
         raise HTTPException(
             status_code=400,
@@ -638,19 +674,32 @@ def change_master_password(
         item = item_map.get(str(update.id))
         if not item:
             raise HTTPException(status_code=400, detail="Master password payload contains an unknown item")
+        if item.revision != update.revision:
+            raise HTTPException(status_code=412, detail="Vault changed during password preparation. Start the password change again.")
+        if bool(next_envelope) != update.encrypted_data.startswith("v2."):
+            raise HTTPException(status_code=422, detail="Ciphertext and target vault key versions differ")
+        if next_envelope:
+            validate_v2_ciphertext(item.id, update.encrypted_data)
+    for update in body.items:
+        item = item_map[str(update.id)]
         item.encrypted_data = update.encrypted_data
+        item.revision += 1
 
     current_user.hashed_password = hash_password(body.new_master_password_verifier)
     current_user.vault_salt = body.new_vault_salt
+    current_user.key_envelope = next_envelope
     current_user.master_hint = body.master_hint
     _revoke_other_sessions(db, current_user.id, subject.session_id)
-    log_action(db, current_user.id, "MASTER_PASSWORD_CHANGED", request)
+    action = "MASTER_PASSWORD_CHANGED"
+    if next_envelope and not rewrap_only:
+        action = "VAULT_KEY_ROTATED" if previous_envelope else "VAULT_ENCRYPTION_UPGRADED"
+    log_action(db, current_user.id, action, request)
+    profile = UserResponse.model_validate(current_user)
     db.commit()
-    db.refresh(current_user)
 
     invalidate_user(str(current_user.id))
     invalidate_all_vault(str(current_user.id))
-    return current_user
+    return profile
 
 
 @router.delete(
@@ -666,6 +715,11 @@ def delete_account(
     db: Annotated[Session, Depends(get_db)],
     current_user: DBUser,
 ):
+    current_user = db.query(User).filter(
+        User.id == current_user.id, User.is_active.is_(True),
+    ).populate_existing().with_for_update().first()
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Account unavailable")
     if not _verify_master_password(current_user, body.master_password_verifier):
         raise HTTPException(status_code=401, detail=INVALID_MASTER_PASSWORD)
 
@@ -673,6 +727,7 @@ def delete_account(
     log_action(db, user_id, "ACCOUNT_DELETED", request)
 
     db.query(AuthToken).filter(AuthToken.user_id == user_id).delete(synchronize_session=False)
+    db.query(VaultImport).filter(VaultImport.user_id == user_id).delete(synchronize_session=False)
     db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete(synchronize_session=False)
     db.query(VaultItem).filter(VaultItem.user_id == user_id).delete(synchronize_session=False)
     db.query(AuditLog).filter(AuditLog.user_id == user_id).delete(synchronize_session=False)
