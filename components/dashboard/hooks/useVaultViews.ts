@@ -176,7 +176,7 @@ export function useVaultViews({ isAuthenticated, isVaultLocked, setVaultItems, c
         }, signal);
         return data;
       },
-      encrypted => decryptData(encrypted, key), signal,
+      (encrypted, itemId) => decryptData(encrypted, key, itemId), signal,
     );
     signal.throwIfAborted();
     if (useAuthStore.getState().cryptoKey !== key) throw new DOMException('Vault locked', 'AbortError');
