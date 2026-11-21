@@ -65,7 +65,8 @@ export async function requestVaultPage(view: ViewRequest, page: number) {
 
 export function rehydrateListItem(item: VaultItem, storeItems: VaultItem[]): VaultItem {
   const cached = storeItems.find((storeItem) => storeItem.id === item.id);
-  return cached?.decrypted ? { ...item, decrypted: cached.decrypted } : item;
+  return cached?.decrypted && cached.revision === item.revision
+    ? { ...item, decrypted: cached.decrypted } : item;
 }
 
 export function sortByUpdatedDesc(items: VaultItem[]): VaultItem[] {
