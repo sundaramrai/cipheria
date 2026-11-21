@@ -8,6 +8,7 @@ interface AuthStore {
   isAuthenticated: boolean;
   vaultItems: VaultItem[];
   isVaultLocked: boolean;
+  lockVersion: number;
 
   completeAuth: (user: UserProfile, accessToken: string, key: CryptoKey) => void;
   setUser: (user: UserProfile | null) => void;
@@ -25,18 +26,29 @@ export const useAuthStore = create<AuthStore>((set) => ({
   isAuthenticated: false,
   vaultItems: [],
   isVaultLocked: true,
+  lockVersion: 0,
 
   completeAuth: (user, accessToken, key) => {
     setAccessToken(accessToken);
-    set({
+    set(state => ({
       user,
       cryptoKey: key,
       isAuthenticated: true,
       isVaultLocked: false,
-    });
+      lockVersion: state.lockVersion + 1,
+    }));
   },
 
-  setUser: (user) => set({ user }),
+  setUser: (user) => set((state) => {
+    // A profile event must never attach an existing key to a different account
+    // or salt, even if a separate cross-tab lock event is delayed or lost.
+    if (user?.id !== state.user?.id || user?.vault_salt !== state.user?.vault_salt
+      || user?.key_envelope?.key_id !== state.user?.key_envelope?.key_id
+      || user?.key_envelope?.vault_id !== state.user?.key_envelope?.vault_id) {
+      return { user, cryptoKey: null, isVaultLocked: true, vaultItems: [], lockVersion: state.lockVersion + 1 };
+    }
+    return { user };
+  }),
 
   setVaultKey: (key) => set({ cryptoKey: key, isVaultLocked: false }),
 
@@ -47,7 +59,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
       vaultItems: state.vaultItems.map((v) => (v.id === id ? item : v)),
     })),
 
-  lockVault: () => set({ cryptoKey: null, isVaultLocked: true, vaultItems: [] }),
+  // Increment even when already locked so a pending unlock cannot undo a new lock.
+  lockVault: () => set(state => ({ cryptoKey: null, isVaultLocked: true, vaultItems: [], lockVersion: state.lockVersion + 1 })),
 
   restoreSession: (() => {
     let pending: Promise<boolean> | null = null;
@@ -88,12 +101,13 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   logout: () => {
     setAccessToken(null);
-    set({
+    set(state => ({
       user: null,
       cryptoKey: null,
       isAuthenticated: false,
       vaultItems: [],
       isVaultLocked: true,
-    });
+      lockVersion: state.lockVersion + 1,
+    }));
   },
 }));
