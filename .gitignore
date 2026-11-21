@@ -18,3 +18,7 @@ tsconfig.tsbuildinfo
 
 # pnpm
 .pnpm-store/
+
+# Browser checks (never retain vault contents in artifacts)
+test-results/
+playwright-report/
