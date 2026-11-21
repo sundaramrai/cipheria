@@ -1,14 +1,16 @@
 'use client';
 
 import type { DecryptedPayload } from './types';
+import { itemContext, verifierV2 } from './vaultKeys.ts';
 
 /**
  * crypto.ts — Client-side AES-256-GCM encryption using the Web Crypto API.
  *
  * Security model:
- * - User's master password → PBKDF2 (600k iterations, SHA-256) → 256-bit key
+ * - Legacy: password → PBKDF2 (600k iterations, SHA-256) → payload key
+ * - Version 2: random payload key, password-protected by a separate wrapping key
  * - The vault salt comes from the server (unique per user, rotated on master password change)
- * - Each vault item is encrypted independently: AES-256-GCM with a fresh 12-byte IV
+ * - AES-256-GCM uses a fresh 12-byte IV; version 2 authenticates vault/item/key IDs
  * - Item contents are encrypted; names and organisational metadata are not
  * - The derived key lives only in memory; it's never persisted
  */
@@ -46,7 +48,9 @@ export function generateSaltHex(bytes = 32): string {
 export async function deriveMasterPasswordVerifier(
   masterPassword: string,
   saltHex: string,
+  version = 1,
 ): Promise<string> {
+  if (version === 2) return verifierV2(masterPassword, saltHex);
   const keyBits = await deriveKeyBits(masterPassword, saltHex);
   return hashBytesHex(keyBits);
 }
@@ -64,26 +68,34 @@ export async function deriveKey(masterPassword: string, saltHex: string): Promis
 }
 
 // Encrypt
-export async function encryptData(data: object, key: CryptoKey): Promise<string> {
+export async function encryptData(data: object, key: CryptoKey, itemId?: string): Promise<string> {
   const iv = new Uint8Array(12);
   crypto.getRandomValues(iv);
   const plaintext = new TextEncoder().encode(JSON.stringify(data));
 
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext);
+  const additionalData = itemContext(key, itemId);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, ...(additionalData ? { additionalData } : {}) }, key, plaintext);
 
-  return `${bytesToBase64(iv)}.${bytesToBase64(new Uint8Array(ciphertext))}`;
+  return `${additionalData ? 'v2.' : ''}${bytesToBase64(iv)}.${bytesToBase64(new Uint8Array(ciphertext))}`;
 }
 
 // Decrypt
 export async function decryptData<T = Record<string, unknown>>(
   encrypted: string,
   key: CryptoKey,
+  itemId?: string,
 ): Promise<T> {
-  const [ivB64, ciphertextB64] = encrypted.split('.');
+  const additionalData = itemContext(key, itemId);
+  const versioned = encrypted.startsWith('v2.');
+  if (versioned !== Boolean(additionalData)) throw new Error('Ciphertext and vault key versions differ');
+  const parts = encrypted.split('.');
+  if (parts.length !== (versioned ? 3 : 2)) throw new Error('Malformed ciphertext');
+  const [ivB64, ciphertextB64] = versioned ? parts.slice(1) : parts;
   const iv = base64ToBytes(ivB64);
   const ciphertext = base64ToBytes(ciphertextB64);
 
-  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+  if (iv.byteLength !== 12 || ciphertext.byteLength < 16) throw new Error('Malformed ciphertext');
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, ...(additionalData ? { additionalData } : {}) }, key, ciphertext);
 
   return JSON.parse(new TextDecoder().decode(plaintext)) as T;
 }
