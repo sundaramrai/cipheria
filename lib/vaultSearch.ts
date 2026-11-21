@@ -10,7 +10,7 @@ export function itemMatchesSearch(item: VaultItem, term: string): boolean {
 /** Fetch every page; retain searchable fields without retaining decrypted passwords. */
 export async function loadSearchItems(
   fetchPage: (page: number) => Promise<PaginatedVaultItems<VaultItem>>,
-  decrypt: (encrypted: string) => Promise<DecryptedPayload>,
+  decrypt: (encrypted: string, itemId: string) => Promise<DecryptedPayload>,
   signal: AbortSignal,
 ): Promise<VaultItem[]> {
   const items: VaultItem[] = [];
@@ -23,7 +23,7 @@ export async function loadSearchItems(
     const batch = await Promise.all(data.items.map(async item => { // NOSONAR -- Bound concurrent decryption to one page before fetching more ciphertext.
       if (item.category !== 'login') return item;
       if (!item.encrypted_data) throw new Error('Missing encrypted login data');
-      const payload = await decrypt(item.encrypted_data);
+      const payload = await decrypt(item.encrypted_data, item.id);
       return { ...item, search_fields: {
         username: typeof payload.username === 'string' ? payload.username : '',
         url: typeof payload.url === 'string' ? payload.url : '',
