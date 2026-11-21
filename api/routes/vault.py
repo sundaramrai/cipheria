@@ -2,12 +2,13 @@
 Vault CRUD with Redis caching.
 """
 
+import hashlib
 import logging
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -20,17 +21,20 @@ from cache import (
     set_cached_vault_item,
     set_cached_vault_list,
 )
-from database import VaultItem, get_db
+from database import User, VaultImport, VaultItem, get_db
 from deps import CurrentSubject, DBUser
 from limiter import limiter
 from schemas import (
     PaginatedVaultResponse,
+    VaultImportRequest,
+    VaultImportResponse,
     VaultItemCreate,
     VaultItemResponse,
     VaultItemSummary,
     VaultItemUpdate,
 )
 from vault_counts import get_cached_sidebar_counts_for_user
+from vault_writes import item_etag, lock_item, lock_vault, validate_ciphertext
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +43,57 @@ router = APIRouter(prefix="/vault", tags=["vault"])
 ITEM_NOT_FOUND_MSG = "Item not found"
 MAX_PAGE_SIZE = 100
 VAULT_ITEM_LIMIT = 1000
+MAX_IMPORT_BYTES = 3 * 1024 * 1024
+
+
+@router.post("/import/json", response_model=VaultImportResponse, max_body_size=MAX_IMPORT_BYTES)
+@limiter.limit("5/minute")
+def import_vault(
+    body: VaultImportRequest,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: DBUser,
+):
+    # The same row lock is used by password changes and capacity-increasing writes.
+    # Refresh the identity-map instance after waiting for a concurrent transaction.
+    user = db.query(User).filter(
+        User.id == current_user.id, User.is_active.is_(True),
+    ).populate_existing().with_for_update().first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Account unavailable")
+    payload_hash = hashlib.sha256(body.model_dump_json(exclude_none=True).encode()).hexdigest()
+    receipt = db.get(VaultImport, (user.id, body.operation_id))
+    if receipt:
+        if receipt.payload_hash != payload_hash:
+            raise HTTPException(status_code=409, detail="Import retry differs from the original request")
+        # Also repair list invalidation if the original response was interrupted after commit.
+        invalidate_vault_list(str(user.id))
+        return VaultImportResponse(imported_count=receipt.imported_count)
+    if user.vault_salt != body.destination_salt:
+        raise HTTPException(status_code=409, detail="Vault password changed. Unlock and prepare the import again.")
+    ids = [item.id for item in body.items if item.id]
+    if len(ids) != len(set(ids)) or (ids and db.query(VaultItem.id).filter(VaultItem.id.in_(ids)).first()):
+        raise HTTPException(status_code=409, detail="Import item identifiers already exist")
+    for item in body.items:
+        validate_ciphertext(user, item.id, item.encrypted_data)
+    count = db.query(func.count(VaultItem.id)).filter(
+        VaultItem.user_id == user.id, VaultItem.is_deleted.is_(False),
+    ).scalar() or 0
+    if count + len(body.items) > VAULT_ITEM_LIMIT:
+        raise HTTPException(status_code=400, detail="Import would exceed the 1000 active item limit")
+    try:
+        db.add_all([VaultItem(user_id=user.id, **item.model_dump()) for item in body.items])
+        db.add(VaultImport(
+            user_id=user.id, operation_id=body.operation_id,
+            payload_hash=payload_hash, imported_count=len(body.items),
+        ))
+        log_action(db, user.id, "VAULT_IMPORT", request)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    invalidate_vault_list(str(user.id))
+    return VaultImportResponse(imported_count=len(body.items))
 
 
 @router.get("/export/json")
@@ -49,6 +104,7 @@ def export_vault(
     current_user: DBUser,
     include_deleted: Annotated[bool, Query()] = False,
 ):
+    current_user = db.query(User).filter(User.id == current_user.id).populate_existing().with_for_update().one()
     filters = [VaultItem.user_id == current_user.id]
     if not include_deleted:
         filters.append(VaultItem.is_deleted.is_(False))
@@ -59,12 +115,14 @@ def export_vault(
 
     logger.info("VAULT_EXPORT user=%s items=%s", current_user.id, len(items))
     return {
-        "export_version": "1.0",
+        "export_version": "2.0" if current_user.key_envelope else "1.0",
+        "key_envelope": current_user.key_envelope,
         "user_email": current_user.email,
         "vault_salt": current_user.vault_salt,
         "items": [
             {
                 "id": str(item.id),
+                "revision": item.revision,
                 "name": item.name,
                 "category": item.category,
                 "encrypted_data": item.encrypted_data,
@@ -117,6 +175,7 @@ def list_items(
     rows = (
         db.query(
             VaultItem.id,
+            VaultItem.revision,
             VaultItem.name,
             VaultItem.category,
             VaultItem.is_favourite,
@@ -172,12 +231,15 @@ def get_item(
     item_id: UUID,
     db: Annotated[Session, Depends(get_db)],
     current_user: CurrentSubject,
+    response: Response,
+    fresh: Annotated[bool, Query()] = False,
 ):
     user_id = str(current_user.id)
     item_key = str(item_id)
 
-    cached = get_cached_vault_item(user_id, item_key)
+    cached = None if fresh else get_cached_vault_item(user_id, item_key)
     if cached is not None:
+        response.headers["ETag"] = item_etag(item_id, cached["revision"])
         logger.debug("vault:item cache HIT user=%s item=%s", user_id, item_key)
         return cached
 
@@ -191,6 +253,7 @@ def get_item(
         raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
 
     data = VaultItemResponse.model_validate(item).model_dump(mode="json")
+    response.headers["ETag"] = item_etag(item.id, item.revision)
     set_cached_vault_item(user_id, item_key, data)
     return data
 
@@ -205,7 +268,13 @@ def create_item(
     body: VaultItemCreate,
     db: Annotated[Session, Depends(get_db)],
     current_user: DBUser,
+    response: Response,
+    vault_salt: Annotated[str | None, Header(alias="X-Vault-Salt")] = None,
 ):
+    owner = lock_vault(db, current_user.id, vault_salt)
+    validate_ciphertext(owner, body.id, body.encrypted_data)
+    if body.id and db.get(VaultItem, body.id):
+        raise HTTPException(status_code=409, detail="Item identifier already exists")
     user_id = str(current_user.id)
     count = (
         db.query(func.count(VaultItem.id))
@@ -219,6 +288,7 @@ def create_item(
         )
 
     item = VaultItem(
+        **({"id": body.id} if body.id else {}),
         user_id=current_user.id,
         name=body.name,
         category=body.category,
@@ -226,14 +296,16 @@ def create_item(
         is_favourite=body.is_favourite,
     )
     db.add(item)
-    db.commit()
+    db.flush()
     db.refresh(item)
+    data = VaultItemResponse.model_validate(item).model_dump(mode="json")
+    db.commit()
+    response.headers["ETag"] = item_etag(data["id"], data["revision"])
 
     invalidate_vault_list(user_id)
     logger.debug("vault:list cache busted (create) user=%s", user_id)
 
-    data = VaultItemResponse.model_validate(item).model_dump(mode="json")
-    set_cached_vault_item(user_id, str(item.id), data)
+    set_cached_vault_item(user_id, data["id"], data)
     return data
 
 
@@ -247,36 +319,45 @@ def update_item(
     body: VaultItemUpdate,
     db: Annotated[Session, Depends(get_db)],
     current_user: DBUser,
+    response: Response,
+    if_match: Annotated[str | None, Header()] = None,
+    vault_salt: Annotated[str | None, Header(alias="X-Vault-Salt")] = None,
 ):
+    owner = lock_vault(db, current_user.id, vault_salt)
     user_id = str(current_user.id)
     item_key = str(item_id)
 
-    item = (
-        db.query(VaultItem)
-        .filter(VaultItem.id == item_id, VaultItem.user_id == current_user.id)
-        .first()
-    )
-    if not item:
-        raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
-
+    item = lock_item(db, current_user.id, item_id, if_match)
     updates = body.model_dump(exclude_unset=True)
+    if updates.get("encrypted_data"):
+        validate_ciphertext(owner, item.id, updates["encrypted_data"])
+    if any(value is None for value in updates.values()):
+        raise HTTPException(status_code=422, detail="Item fields cannot be null")
+    if item.is_deleted:
+        raise HTTPException(status_code=409, detail="Restore this item before editing it")
     if set(updates) == {"is_favourite"}:
         # Explicitly preserve the content timestamp instead of running onupdate.
         db.query(VaultItem).filter(VaultItem.id == item.id).update(
-            {VaultItem.is_favourite: updates["is_favourite"], VaultItem.updated_at: VaultItem.updated_at},
+            {VaultItem.is_favourite: updates["is_favourite"], VaultItem.updated_at: VaultItem.updated_at,
+             VaultItem.revision: item.revision + 1},
             synchronize_session=False,
         )
     else:
         for field, value in updates.items():
             setattr(item, field, value)
-    db.commit()
+        item.revision += 1
+    db.flush()
     db.refresh(item)
+    # Snapshot while the lock is held. Refreshing after commit can attach a
+    # later writer's revision to the caller's locally decrypted draft.
+    data = VaultItemResponse.model_validate(item).model_dump(mode="json")
+    db.commit()
+    response.headers["ETag"] = item_etag(data["id"], data["revision"])
 
     invalidate_vault_item(user_id, item_key)
     invalidate_vault_list(user_id)
     logger.debug("vault cache busted (update) user=%s item=%s", user_id, item_key)
 
-    data = VaultItemResponse.model_validate(item).model_dump(mode="json")
     set_cached_vault_item(user_id, item_key, data)
     return data
 
@@ -290,19 +371,16 @@ def delete_item(
     item_id: UUID,
     db: Annotated[Session, Depends(get_db)],
     current_user: DBUser,
+    if_match: Annotated[str | None, Header()] = None,
+    vault_salt: Annotated[str | None, Header(alias="X-Vault-Salt")] = None,
 ):
+    lock_vault(db, current_user.id, vault_salt)
     user_id = str(current_user.id)
     item_key = str(item_id)
 
-    item = (
-        db.query(VaultItem)
-        .filter(VaultItem.id == item_id, VaultItem.user_id == current_user.id)
-        .first()
-    )
-    if not item:
-        raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
-
+    item = lock_item(db, current_user.id, item_id, if_match)
     item.is_deleted = True
+    item.revision += 1
     item.deleted_at = datetime.now(UTC)
     db.commit()
 
@@ -320,18 +398,15 @@ def restore_item(
     item_id: UUID,
     db: Annotated[Session, Depends(get_db)],
     current_user: DBUser,
+    response: Response,
+    if_match: Annotated[str | None, Header()] = None,
+    vault_salt: Annotated[str | None, Header(alias="X-Vault-Salt")] = None,
 ):
+    lock_vault(db, current_user.id, vault_salt)
     user_id = str(current_user.id)
     item_key = str(item_id)
 
-    item = (
-        db.query(VaultItem)
-        .filter(VaultItem.id == item_id, VaultItem.user_id == current_user.id)
-        .first()
-    )
-    if not item:
-        raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
-
+    item = lock_item(db, current_user.id, item_id, if_match)
     if item.is_deleted:
         active_count = (
             db.query(func.count(VaultItem.id))
@@ -345,13 +420,16 @@ def restore_item(
             )
 
     item.is_deleted = False
+    item.revision += 1
     item.deleted_at = None
-    db.commit()
+    db.flush()
     db.refresh(item)
+    data = VaultItemResponse.model_validate(item).model_dump(mode="json")
+    db.commit()
+    response.headers["ETag"] = item_etag(data["id"], data["revision"])
 
     invalidate_vault_item(user_id, item_key)
     invalidate_vault_list(user_id)
-    data = VaultItemResponse.model_validate(item).model_dump(mode="json")
     set_cached_vault_item(user_id, item_key, data)
     return data
 
@@ -365,18 +443,16 @@ def delete_item_permanently(
     item_id: UUID,
     db: Annotated[Session, Depends(get_db)],
     current_user: DBUser,
+    if_match: Annotated[str | None, Header()] = None,
+    vault_salt: Annotated[str | None, Header(alias="X-Vault-Salt")] = None,
 ):
+    lock_vault(db, current_user.id, vault_salt)
     user_id = str(current_user.id)
     item_key = str(item_id)
 
-    item = (
-        db.query(VaultItem)
-        .filter(VaultItem.id == item_id, VaultItem.user_id == current_user.id)
-        .first()
-    )
-    if not item:
-        raise HTTPException(status_code=404, detail=ITEM_NOT_FOUND_MSG)
-
+    item = lock_item(db, current_user.id, item_id, if_match)
+    if not item.is_deleted:
+        raise HTTPException(status_code=409, detail="Move this item to trash before deleting it permanently")
     db.delete(item)
     db.commit()
 
