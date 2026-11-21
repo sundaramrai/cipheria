@@ -8,7 +8,16 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from dotenv import load_dotenv
-from sqlalchemy import Boolean, Column, Index, Integer, String, Text, create_engine
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    Index,
+    Integer,
+    String,
+    Text,
+    create_engine,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import NullPool
@@ -62,6 +71,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(255), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
+    key_envelope = Column(JSON, nullable=True)
     full_name = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
     email_verified = Column(Boolean, default=False)
@@ -90,6 +100,7 @@ class VaultItem(Base):
     category = Column(String(64), default="login")  # login, card, note, identity
     # Browser-encrypted JSON payload; name and category remain separate metadata.
     encrypted_data = Column(Text, nullable=False)
+    revision = Column(Integer, nullable=False, default=1, server_default="1")
     is_favourite = Column(Boolean, default=False)
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(TIMESTAMP(timezone=True), nullable=True)
@@ -120,6 +131,16 @@ class AuditLog(Base):
     created_at = Column(
         TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
+
+
+class VaultImport(Base):
+    __tablename__ = "vault_imports"
+
+    user_id = Column(UUID(as_uuid=True), primary_key=True)
+    operation_id = Column(UUID(as_uuid=True), primary_key=True)
+    payload_hash = Column(String(64), nullable=False)
+    imported_count = Column(Integer, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
 
 
 class RefreshToken(Base):
