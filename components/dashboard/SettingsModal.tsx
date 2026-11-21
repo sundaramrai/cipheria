@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { KeyRound, Mail, Settings, Trash2, UserRound, MonitorCog, MoonStar, SunMedium } from 'lucide-react';
+import { KeyRound, Settings, Trash2, UserRound, MonitorCog, MoonStar, SunMedium } from 'lucide-react';
 import { Modal } from './ItemModal';
 import { applyThemePreference, getStoredThemePreference } from '@/lib/theme';
 import type { ThemePreference } from '@/lib/theme';
@@ -27,6 +27,7 @@ interface SettingsModalProps {
     email?: string;
     email_verified?: boolean;
     vault_salt: string;
+    key_envelope?: import('@/lib/vaultKeys').KeyEnvelope | null;
   } | null;
   profileForm: ProfileForm;
   setProfileForm: (form: ProfileForm) => void;
@@ -42,6 +43,7 @@ interface SettingsModalProps {
   onSaveProfile: (e: React.SyntheticEvent) => void;
   onResendVerification: () => void;
   onChangeMasterPassword: (e: React.SyntheticEvent) => void;
+  onRotateKey: (e: React.SyntheticEvent) => void;
   onDeleteAccount: (e: React.SyntheticEvent) => void;
 }
 
@@ -92,7 +94,7 @@ export function SettingsModal({
   onClose,
   onSaveProfile,
   onResendVerification,
-  onChangeMasterPassword,
+  onChangeMasterPassword, onRotateKey,
   onDeleteAccount,
 }: Readonly<SettingsModalProps>) {
   const [theme, setTheme] = useState<ThemePreference>('system');
@@ -104,7 +106,7 @@ export function SettingsModal({
     if (!user || revokingSessions) return;
     setRevokingSessions(true);
     try {
-      const verifier = await deriveMasterPasswordVerifier(sessionPassword, user.vault_salt);
+      const verifier = await deriveMasterPasswordVerifier(sessionPassword, user.vault_salt, user.key_envelope ? 2 : 1);
       const { data } = await authApi.revokeOtherSessions(verifier);
       setSessionPassword('');
       toastService.success(data.message);
@@ -146,6 +148,19 @@ export function SettingsModal({
                 value={profileForm.full_name}
                 onChange={(e) => setProfileForm({ ...profileForm, full_name: e.target.value })}
               />
+            </div>
+            <div>
+              <label htmlFor="settings-email" style={labelStyle}>EMAIL</label>
+              <input id="settings-email" className="input-field" type="email" value={user?.email ?? ''} readOnly />
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginTop: 8 }}>
+                {user?.email_verified ? 'Email verified' : 'Email not verified'}
+              </p>
+              {!user?.email_verified && (
+                <button type="button" className="btn-ghost" onClick={onResendVerification}
+                  disabled={verificationSending} style={{ marginTop: 8 }}>
+                  {verificationSending ? 'Sending…' : 'Resend verification email'}
+                </button>
+              )}
             </div>
             <div>
               <label htmlFor="settings-master-hint" style={labelStyle}>MASTER HINT</label>
@@ -200,30 +215,12 @@ export function SettingsModal({
 
         <section style={sectionStyle}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Mail size={16} color="var(--accent)" />
-            <h4 style={{ color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 600 }}>Email Verification</h4>
-          </div>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.6 }}>
-            {user?.email_verified
-              ? `Verified: ${user?.email}`
-              : `Current email: ${user?.email ?? 'Unknown'}`}
-          </p>
-          {!user?.email_verified && (
-            <button type="button" className="btn-ghost" onClick={onResendVerification} disabled={verificationSending}>
-              {verificationSending ? 'Sending…' : 'Resend verification email'}
-            </button>
-          )}
-        </section>
-
-        <div className="hairline" />
-
-        <section style={sectionStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <KeyRound size={16} color="var(--accent)" />
             <h4 style={{ color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 600 }}>Master Password</h4>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.6 }}>
-            Cipheria re-encrypts every vault item, including password history and items in trash, with the new password. Your other sessions are signed out.
+            {user?.key_envelope ? 'Changing your password protects the same vault key with your new password. Your saved items stay encrypted under that key.'
+              : 'Changing your password also upgrades vault encryption. Existing items and password history are preserved.'} Your other sessions are signed out.
           </p>
           <form onSubmit={onChangeMasterPassword} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
@@ -268,9 +265,15 @@ export function SettingsModal({
               />
             </div>
             <button type="submit" className="btn-primary" disabled={masterPasswordSaving}>
-              {masterPasswordSaving ? 'Re-encrypting…' : 'Change Master Password'}
+              {masterPasswordSaving ? 'Updating vault protection…' : 'Change Master Password'}
             </button>
           </form>
+          <p className="text-sm leading-6 text-(--text-secondary)">
+            {user?.key_envelope ? 'Rotate the vault key when its protection may have been compromised. This re-encrypts every item, including Trash, using your current master password.'
+              : 'Upgrade encryption using your current master password to prepare this vault for additional unlock methods.'}
+          </p>
+          <button type="button" className="btn-ghost" disabled={masterPasswordSaving}
+            onClick={onRotateKey}>{user?.key_envelope ? 'Rotate vault key' : 'Upgrade vault encryption'}</button>
         </section>
 
         <div className="hairline" />
