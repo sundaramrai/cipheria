@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { Cormorant_Garamond, DM_Mono, Outfit } from 'next/font/google';
 import '../styles/globals.css';
-import { Toaster } from 'react-hot-toast';
+import { ToastViewport } from '@/components/ToastViewport';
 import { ThemeSync } from '@/components/ThemeSync';
 import { THEME_STORAGE_KEY } from '@/lib/theme';
 
@@ -36,7 +37,8 @@ export const metadata: Metadata = {
   ],
 };
 
-export default function RootLayout({ children }: { readonly children: React.ReactNode }) {
+export default async function RootLayout({ children }: { readonly children: React.ReactNode }) {
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   const themeInitScript = `
     (function () {
       try {
@@ -62,28 +64,14 @@ export default function RootLayout({ children }: { readonly children: React.Reac
       className={`${cormorant.variable} ${dmMono.variable} ${outfit.variable}`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body suppressHydrationWarning>
         <ThemeSync />
         <div style={{ position: 'relative', zIndex: 1 }}>
           {children}
         </div>
-        <Toaster
-          position="bottom-right"
-          containerStyle={{ zIndex: 9999 }}
-          toastOptions={{
-            style: {
-              background: 'var(--bg-card)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border-hover)',
-              fontFamily: 'Outfit, sans-serif',
-              fontSize: '0.875rem',
-            },
-            success: { iconTheme: { primary: 'var(--success)', secondary: 'var(--status-ink)' } },
-            error: { iconTheme: { primary: 'var(--danger)', secondary: 'var(--status-ink)' } },
-          }}
-        />
+        <ToastViewport />
       </body>
     </html>
   );
