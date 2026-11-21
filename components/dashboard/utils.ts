@@ -16,12 +16,13 @@ export const fetchAndDecryptItem = async (item: VaultItem,
     let encryptedData = item.encrypted_data;
     if (!encryptedData) {
         const { data } = await vaultApi.get(item.id);
+        item = { ...item, ...data };
         encryptedData = data.encrypted_data as string;
     }
     if (!encryptedData?.includes('.')) throw new Error('BAD_FORMAT');
     let dec: unknown;
     try {
-        dec = await decryptData(encryptedData, key);
+        dec = await decryptData(encryptedData, key, item.id);
     } catch (cryptoErr) {
         console.error('[decrypt] WebCrypto error for item', item.id, cryptoErr);
         throw new Error('CRYPTO_FAIL', { cause: cryptoErr });
