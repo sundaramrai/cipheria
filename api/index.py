@@ -13,10 +13,13 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy.exc import InterfaceError, OperationalError
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from limiter import limiter
 from routes.auth import router as auth_router
 from routes.vault import router as vault_router
+from security import BrowserSecurityMiddleware, parse_allowed_origins
+from settings import is_production
 
 logger = logging.getLogger("cipheria.api")
 access_logger = logging.getLogger("uvicorn.access")
@@ -28,18 +31,28 @@ class _HealthcheckAccessFilter(logging.Filter):
         return '"GET /health ' not in message
 
 
+class _VercelRootPathMiddleware:
+    """Supply the public mount path when Vercel invokes the ASGI app directly."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in {"http", "websocket"}:
+            scope = {**scope, "root_path": "/api"}
+        await self.app(scope, receive, send)
+
+
 if os.getenv("SUPPRESS_HEALTHCHECK_ACCESS_LOGS", "").lower() in {"1", "true", "yes", "on"}:
     access_logger.addFilter(_HealthcheckAccessFilter())
 
-IS_PROD = (
-    os.getenv("ENVIRONMENT") == "production"
-)
+IS_PROD = is_production()
 
 
 def _get_allowed_origins() -> list[str]:
     raw = os.getenv("ALLOWED_ORIGINS")
     if raw:
-        origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+        origins = parse_allowed_origins(raw)
         if origins:
             return origins
     if IS_PROD:
@@ -66,7 +79,6 @@ app = FastAPI(
     title="Cipheria API",
     description="Cipheria account sessions and storage for browser-encrypted vault payloads",
     version="1.0.0",
-    root_path="/api" if os.getenv("VERCEL") == "1" else "",
     docs_url=None if IS_PROD else "/docs",
     redoc_url=None if IS_PROD else "/redoc",
     openapi_url=None if IS_PROD else "/openapi.json",
@@ -81,17 +93,22 @@ app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 _allowed_origins = _get_allowed_origins()
+app.add_middleware(BrowserSecurityMiddleware, allowed_origins=_allowed_origins)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "If-Match", "X-Vault-Salt"],
+    expose_headers=["ETag"],
 )
 
-# Vercel forwards /api unchanged. root_path handles that public prefix while
+# Vercel forwards /api unchanged. The ASGI root path handles that prefix while
 # keeping the router paths usable directly by local Uvicorn and Docker.
+if os.getenv("VERCEL") == "1":
+    app.add_middleware(_VercelRootPathMiddleware)
+
 app.include_router(auth_router)
 app.include_router(vault_router)
 
