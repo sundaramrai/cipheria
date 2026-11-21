@@ -4,7 +4,6 @@ import inspect
 import os
 import unittest
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -39,10 +38,12 @@ class VaultUpdateTests(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("sqlite:///:memory:")
         self.addCleanup(self.engine.dispose)
+        User.__table__.create(self.engine)
         VaultItem.__table__.create(self.engine)
         self.db = Session(self.engine)
         self.addCleanup(self.db.close)
-        self.user = SimpleNamespace(id=USER_ID)
+        self.user = User(id=USER_ID, email="writes@example.test", hashed_password="unused", vault_salt="a" * 64)
+        self.db.add(self.user)
         self.original_date = datetime(2025, 1, 1, tzinfo=UTC)
         for index, item_id in enumerate((FIRST_ITEM_ID, SECOND_ITEM_ID), start=1):
             self.db.add(VaultItem(
@@ -61,7 +62,9 @@ class VaultUpdateTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def update(self, **changes):
-        return vault.update_item(SECOND_ITEM_ID, VaultItemUpdate(**changes), self.db, self.user)
+        item = self.db.get(VaultItem, SECOND_ITEM_ID)
+        return vault.update_item(SECOND_ITEM_ID, VaultItemUpdate(**changes), self.db, self.user, Response(),
+                                 f'"{item.id}:{item.revision}"', self.user.vault_salt)
 
     def test_favourite_toggle_preserves_timestamp_and_list_order_after_reload(self):
         for favourite in (True, False):
@@ -256,7 +259,7 @@ class SessionTests(unittest.TestCase):
         self.db.commit()
         body = ChangeMasterPasswordRequest(
             current_master_password_verifier=self.verifier, new_master_password_verifier='b' * 64,
-            new_vault_salt='c' * 64, items=[{"id": item.id, "encrypted_data": "rotated-ciphertext-with-history"}],
+            new_vault_salt='c' * 64, items=[{"id": item.id, "revision": item.revision, "encrypted_data": "rotated-ciphertext-with-history"}],
         )
         inspect.unwrap(auth.change_master_password)(body, self.request, self.db, self.user, self.subject(access))
         self.assertEqual(self.subject(access).id, self.user.id)
