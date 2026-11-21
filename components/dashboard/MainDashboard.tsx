@@ -1,6 +1,6 @@
 'use client';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { RotateCcw, Search, Plus, Shield, Globe, Trash2, Download, Star, Edit2, ChevronRight } from 'lucide-react';
+import { RotateCcw, Search, Plus, Shield, Globe, Trash2, Download, Upload, Star, Edit2, ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { checkHIBP } from '@/lib/crypto';
 import { CATEGORY_ICONS, ITEM_CATEGORIES } from './types';
@@ -8,7 +8,8 @@ import { DesktopSidebar, MobileTopBar } from './Sidebar';
 import { Pagination } from './Pagination';
 import { Field, HibpCheck } from './Field';
 import { ItemModal, ITEM_FIELDS, Modal } from './ItemModal';
-import type { DecryptedPayload, SidebarCounts, UserProfile, VaultItem } from '@/lib/types';
+import type { ItemModalProps } from './ItemModal';
+import type { DecryptedPayload, SidebarCounts, VaultItem } from '@/lib/types';
 import type { Category, ItemForm } from './types';
 
 const CATEGORIES = [
@@ -369,13 +370,13 @@ function EmptyArtwork({ icon: Icon, label }: Readonly<{ icon: LucideIcon; label:
 }
 
 interface MainDashboardProps {
-    user: UserProfile | null;
     category: Category;
     setCategory: (category: Category) => MaybePromiseVoid;
     searchValue: string;
     searchError: string | null;
     onSearchChange: (value: string) => void;
     handleExport: () => MaybePromiseVoid;
+    onImport: () => void;
     onOpenSettings: () => void;
     onToggleFavourites: () => MaybePromiseVoid;
     onToggleTrash: () => MaybePromiseVoid;
@@ -409,6 +410,8 @@ interface MainDashboardProps {
     setEditForm: (form: ItemForm | null) => void;
     updatingItem: boolean;
     handleEditItem: (e: React.SyntheticEvent) => MaybePromiseVoid;
+    editRevision?: number;
+    editConflict?: ItemModalProps['conflict'];
     filteredItems: VaultItem[];
     page: number;
     totalPages: number;
@@ -463,12 +466,12 @@ function EmptyViewAction({ hasSearch, searchError, searchValue, onSearchChange, 
 
 export function MainDashboard(props: Readonly<MainDashboardProps>) {
     const {
-        user, category, searchValue, onSearchChange, handleExport, lockVault, handleLogout,
+        category, searchValue, onSearchChange, handleExport, onImport, lockVault, handleLogout,
         onOpenSettings, onToggleFavourites, onToggleTrash, isFavouritesView, isTrashView,
         sidebarCounts, setShowAddModal, setCategory, selectedItem, clearSelection, handleSelectItem, selectedItemLoading,
         handleToggleFav, handleOpenEdit, handleDelete, handleRestoreItem, handleDeletePermanent, deletingId, copyToClipboard,
         hibp, setHibp, showAddModal, newItem, setNewItem, savingItem, handleAddItem,
-        showEditModal, setShowEditModal, editForm, setEditForm, updatingItem, handleEditItem,
+        showEditModal, setShowEditModal, editForm, setEditForm, updatingItem, handleEditItem, editRevision, editConflict,
         filteredItems, page, totalPages, onPageChange, searchLoading,
     } = props;
 
@@ -638,12 +641,12 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                 <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
 
                 <div className="flex gap-2 border-t border-(--border) px-4 pt-3 pb-[calc(12px+env(safe-area-inset-bottom,0px))]">
+                    <button type="button" onClick={onImport} className="btn-ghost flex-1 text-xs">
+                        <Upload size={14} /> Import
+                    </button>
                     <button type="button" onClick={handleExport} className="btn-ghost flex-1 text-xs">
                         <Download size={14} /> Export
                     </button>
-                    <p className="flex flex-1 items-center justify-center truncate px-2 text-xs text-(--text-secondary)">
-                        {user?.email}
-                    </p>
                 </div>
             </div>
 
@@ -656,8 +659,8 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
 
             {/* Desktop layout */}
             <DesktopSidebar
-                user={user} category={category} sidebarCounts={sidebarCounts}
-                setCategory={setCategory} handleExport={handleExport}
+                category={category} sidebarCounts={sidebarCounts}
+                setCategory={setCategory} handleExport={handleExport} onImport={onImport}
                 lockVault={lockVault} handleLogout={handleLogout}
                 onOpenSettings={onOpenSettings} onToggleFavourites={onToggleFavourites}
                 onToggleTrash={onToggleTrash} isFavouritesView={isFavouritesView} isTrashView={isTrashView}
@@ -700,7 +703,7 @@ export function MainDashboard(props: Readonly<MainDashboardProps>) {
                     onSubmit={handleAddItem} onClose={handleAddClose} />
             )}
             {showEditModal && editForm && (
-                <ItemModal mode="edit" form={editForm} setForm={setEditForm} saving={updatingItem}
+                <ItemModal key={editRevision} mode="edit" form={editForm} setForm={setEditForm} saving={updatingItem} conflict={editConflict}
                     onSubmit={handleEditItem} onClose={handleEditClose} />
             )}
             {pendingPermanentDelete && (
