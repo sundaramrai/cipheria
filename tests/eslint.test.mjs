@@ -5,6 +5,10 @@ import { ESLint } from 'eslint';
 
 const eslint = new ESLint({ cwd: fileURLToPath(new URL('..', import.meta.url)) });
 
+test('Next.js generated declarations are excluded from linting', async () => {
+  assert.equal(await eslint.isPathIgnored('next-env.d.ts'), true);
+});
+
 async function lint(source, filePath = 'app/page.tsx') {
   const [result] = await eslint.lintText(source, { filePath });
   assert.equal(result.fatalErrorCount, 0, JSON.stringify(result.messages));
