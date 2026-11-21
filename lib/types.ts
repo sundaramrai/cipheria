@@ -28,6 +28,7 @@ export interface DecryptedPayload {
 
 export interface VaultItem {
     id: string;
+    revision: number;
     name: string;
     category: string;
     /** Present in detail responses and encrypted batches for local search. */
@@ -48,6 +49,7 @@ export interface UserProfile {
     email: string;
     full_name?: string;
     vault_salt: string;
+    key_envelope?: import('./vaultKeys').KeyEnvelope | null;
     master_hint?: string;
     email_verified: boolean;
     created_at?: string;
