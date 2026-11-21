@@ -1,13 +1,15 @@
 'use client';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { isAxiosError } from 'axios';
 import { toastService } from '@/lib/toast';
 import { getItemLoadError, getSessionAwareError } from '@/lib/errors';
 import { useAuthStore } from '@/lib/store';
 import type { DecryptedPayload, VaultItem } from '@/lib/types';
 import { vaultApi, authApi } from '@/lib/api';
 import { emitAuthEvent } from '@/lib/authSync';
-import { deriveKey, deriveMasterPasswordVerifier, encryptData, decryptData, generateSaltHex, withPasswordHistory } from '@/lib/crypto';
+import { deriveMasterPasswordVerifier, encryptData, decryptData, withPasswordHistory } from '@/lib/crypto';
+import { createVaultKey, rewrapVaultKey } from '@/lib/vaultKeys';
 import { Category, emptyForm } from '../../../components/dashboard/types';
 import type { ItemForm } from '../../../components/dashboard/types';
 import { fetchAndDecryptItem, buildPayload } from '../../../components/dashboard/utils';
@@ -22,6 +24,7 @@ import { itemMatchesSearch } from '@/lib/vaultSearch';
 import { LockedVaultScreen } from '../../../components/dashboard/LockedVaultScreen';
 import { MainDashboard } from '../../../components/dashboard/MainDashboard';
 import { SettingsModal } from '@/components/dashboard/SettingsModal';
+import { ImportVaultModal } from '@/components/dashboard/ImportVaultModal';
 
 function toItemFormCategory(category: string): ItemForm['category'] {
   return category === 'card' || category === 'note' || category === 'identity'
@@ -46,10 +49,13 @@ export default function Page() {
   } = useAuthStore();
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<VaultItem | null>(null);
   const [newItem, setNewItem] = useState<ItemForm>({ ...emptyForm });
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState<ItemForm | null>(null);
+  const [editBase, setEditBase] = useState<VaultItem | null>(null);
+  const [editConflict, setEditConflict] = useState(false);
   const [savingItem, setSavingItem] = useState(false);
   const [updatingItem, setUpdatingItem] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -100,6 +106,16 @@ export default function Page() {
 
   useEffect(() => {
     if (isVaultLocked) {
+      setShowImportModal(false);
+      setShowAddModal(false);
+      setShowEditModal(false);
+      setNewItem({ ...emptyForm });
+      setEditForm(null);
+      setEditBase(null);
+      setEditConflict(false);
+      setShowSettingsModal(false);
+      setMasterPasswordForm(previous => ({ current_password: '', password: '', confirm: '', master_hint: previous.master_hint }));
+      setDeletePassword('');
       decryptingItemIds.current.clear();
       clearSelection();
     }
@@ -124,6 +140,32 @@ export default function Page() {
     await loadVaultPage(targetPage, view);
   }, [getCurrentView, loadVaultPage, page, runSearch, search]);
 
+  const liveVault = useCallback(() => {
+    const live = useAuthStore.getState();
+    return live.cryptoKey === cryptoKey && live.user?.id === user?.id
+      && live.user?.vault_salt === user?.vault_salt && !live.isVaultLocked;
+  }, [cryptoKey, user]);
+
+  const writeError = useCallback((error: unknown) => {
+    if (isAxiosError(error) && error.response?.status === 409
+      && String(error.response.data?.detail).startsWith('Vault password changed.')) {
+      lockVault();
+      void authApi.me().then(({ data }) => {
+        if (useAuthStore.getState().user?.id === data.id) {
+          setUser(data);
+          emitAuthEvent('user-updated', data);
+        }
+      }).catch(() => { /* The session interceptor handles revoked sessions. */ });
+      return 'Vault password changed. Unlock with the current password before saving.';
+    }
+    if (isAxiosError(error) && error.response?.status === 412) {
+      invalidateCachedViews();
+      clearSelection();
+      void refreshCurrentView().catch(() => { /* The original conflict remains visible. */ });
+    }
+    return getSessionAwareError(error, 'Unable to save this change');
+  }, [clearSelection, invalidateCachedViews, lockVault, refreshCurrentView, setUser]);
+
   const applyOptimisticMutation = useCallback((
     before: VaultItem | null,
     after: VaultItem | null,
@@ -133,9 +175,18 @@ export default function Page() {
     const activeSearch = search.trim().toLowerCase();
     setSidebarCounts((current) => applySidebarDelta(current, before, after));
     const active = activeViewRef.current;
+    const refreshView = (target: typeof active) => {
+      const refresh = target.search
+        ? runSearch(target.search, target.page, target.view, true)
+        : loadVaultPage(target.page, target.view, true);
+      void refresh.catch((err) => {
+        toastService.error(getSessionAwareError(err, 'Unable to refresh vault items'));
+      });
+    };
     if (getViewCacheKey(view) !== getViewCacheKey(active.view) ||
         activeSearch !== active.search || page !== active.page) {
       invalidateCachedViews();
+      refreshView(active);
       return;
     }
     const totalDelta = getMatchDelta(before, after, (item) =>
@@ -157,20 +208,16 @@ export default function Page() {
     }
     if (totalDelta < 0 || activeSearch) {
       const nextPage = clampPage(page, nextTotalPages);
-      const refresh = activeSearch
-        ? runSearch(search, nextPage, view, true)
-        : loadVaultPage(nextPage, view, true);
-      void refresh.catch((err) => {
-        toastService.error(getSessionAwareError(err, 'Unable to refresh vault items'));
-      });
+      refreshView({ ...active, page: nextPage });
     }
   }, [getCurrentView, invalidateCachedViews, loadVaultPage, page, runSearch, search, setCachedView, setPage, setSidebarCounts, setTotalItems, setTotalPages, setVaultItems, totalItems, vaultItems]);
 
-  const buildEncryptedPayload = useCallback(async (form: ItemForm, previous?: DecryptedPayload) => {
+  const buildEncryptedPayload = useCallback(async (form: ItemForm, previous?: DecryptedPayload, id = crypto.randomUUID()) => {
     if (!cryptoKey) throw new Error('Crypto key not available');
     const payload = withPasswordHistory(buildPayload(form), previous);
-    const encrypted_data = await encryptData(payload, cryptoKey);
-    return { payload, encrypted_data };
+    const encrypted_data = await encryptData(payload, cryptoKey, id);
+    if (useAuthStore.getState().cryptoKey !== cryptoKey) throw new Error('Vault locked before saving');
+    return { id, payload, encrypted_data };
   }, [cryptoKey]);
 
   const handleMasterPasswordChange = useCallback(
@@ -235,7 +282,7 @@ export default function Page() {
 
   const handleAddItem = useCallback(async (e: React.SyntheticEvent) => {
     e.preventDefault();
-    if (!cryptoKey) return;
+    if (!cryptoKey || !user) return;
     if (newItem.category === 'login' && newItem.url && !/^https?:\/\//i.exec(newItem.url)) {
       toastService.error('URL must start with http:// or https://');
       return;
@@ -245,19 +292,22 @@ export default function Page() {
       await toastService.withProgress(
         'Saving to vault...',
         async () => {
-          const { encrypted_data, payload } = await buildEncryptedPayload(newItem);
-          const { data } = await vaultApi.create({ name: newItem.name, category: newItem.category, encrypted_data });
+          const { id, encrypted_data, payload } = await buildEncryptedPayload(newItem);
+          const { data } = await vaultApi.create({ id, name: newItem.name, category: newItem.category, encrypted_data }, user.vault_salt);
+          if (!liveVault()) return;
           applyOptimisticMutation(null, { ...data, decrypted: payload });
           setShowAddModal(false);
           setNewItem({ ...emptyForm });
         },
         'Item added to vault',
-        { fallbackError: 'Failed to save item' },
+        { getError: writeError },
       );
     } finally { setSavingItem(false); }
-  }, [applyOptimisticMutation, cryptoKey, newItem, buildEncryptedPayload]);
+  }, [applyOptimisticMutation, cryptoKey, newItem, buildEncryptedPayload, liveVault, user, writeError]);
 
   const handleOpenEdit = useCallback((item: VaultItem) => {
+    setEditBase(item);
+    setEditConflict(false);
     const d = item.decrypted ?? {};
     setEditForm({
       name: item.name, category: toItemFormCategory(item.category),
@@ -271,7 +321,7 @@ export default function Page() {
 
   const handleEditItem = useCallback(async (e: React.SyntheticEvent) => {
     e.preventDefault();
-    if (!cryptoKey || !editForm || !selectedItem) return;
+    if (!cryptoKey || !editForm || !editBase || !user || editConflict) return;
     if (editForm.category === 'login' && editForm.url && !/^https?:\/\//i.exec(editForm.url)) {
       toastService.error('URL must start with http:// or https://');
       return;
@@ -281,11 +331,12 @@ export default function Page() {
       await toastService.withProgress(
         'Updating item...',
         async () => {
-          const previousItem = selectedItem;
-          const { payload, encrypted_data } = await buildEncryptedPayload(editForm, previousItem.decrypted);
-          const { data } = await vaultApi.update(selectedItem.id, { name: editForm.name, category: editForm.category, encrypted_data });
+          const previousItem = editBase;
+          const { payload, encrypted_data } = await buildEncryptedPayload(editForm, previousItem.decrypted, previousItem.id);
+          const { data } = await vaultApi.update(previousItem, { name: editForm.name, category: editForm.category, encrypted_data }, user.vault_salt);
+          if (!liveVault()) return;
           const updated = { ...data, decrypted: payload };
-          updateVaultItem(selectedItem.id, updated);
+          updateVaultItem(previousItem.id, updated);
           if (currentSelectionRef.current === updated.id) {
             const active = activeViewRef.current;
             if (itemMatchesView(updated, active.view) && itemMatchesSearch(updated, active.search)) {
@@ -299,10 +350,67 @@ export default function Page() {
           setEditForm(null);
         },
         'Item updated',
-        { fallbackError: 'Failed to update item' },
+        { getError: (error) => {
+          if (isAxiosError(error) && [412, 404].includes(error.response?.status ?? 0) && liveVault()) {
+            setEditConflict(true);
+            return 'This item changed elsewhere. Your edits have been kept.';
+          }
+          return writeError(error);
+        } },
       );
     } finally { setUpdatingItem(false); }
-  }, [applyOptimisticMutation, buildEncryptedPayload, clearSelection, cryptoKey, editForm, selectedItem, updateVaultItem]);
+  }, [applyOptimisticMutation, buildEncryptedPayload, clearSelection, cryptoKey, editForm, editBase, editConflict, liveVault, user, updateVaultItem, writeError]);
+
+  const reloadConflictedItem = useCallback(async () => {
+    if (!editBase || !cryptoKey) return;
+    setUpdatingItem(true);
+    try {
+      const { data } = await vaultApi.get(editBase.id, true);
+      const decrypted = await decryptData<DecryptedPayload>(data.encrypted_data!, cryptoKey, data.id);
+      if (!liveVault()) return;
+      const latest = { ...data, decrypted };
+      updateVaultItem(latest.id, latest);
+      setSelectedItem(latest);
+      if (latest.is_deleted) {
+        setShowEditModal(false);
+        setEditForm(null);
+        clearSelection();
+        toastService.info('This item is in Trash. Restore it before editing.');
+      } else handleOpenEdit(latest);
+      invalidateCachedViews();
+      void refreshCurrentView().catch(() => {});
+    } catch (error) {
+      // A missing item must leave the draft available for saving as a copy.
+      toastService.error(getSessionAwareError(error, 'Unable to reload this item; your edits are still here'));
+    } finally { setUpdatingItem(false); }
+  }, [clearSelection, cryptoKey, editBase, handleOpenEdit, invalidateCachedViews, liveVault, refreshCurrentView, updateVaultItem]);
+
+  const saveConflictedCopy = useCallback(async () => {
+    if (!editForm || !editBase || !cryptoKey || !user) return;
+    if (!editForm.name.trim()) {
+      toastService.error('Enter a name before saving a separate item');
+      return;
+    }
+    if (editForm.category === 'login' && editForm.url && !/^https?:\/\//i.exec(editForm.url)) {
+      toastService.error('URL must start with http:// or https://');
+      return;
+    }
+    setUpdatingItem(true);
+    try {
+      await toastService.withProgress('Saving a separate item...', async () => {
+        const { id, encrypted_data, payload } = await buildEncryptedPayload(editForm, editBase.decrypted);
+        const { data } = await vaultApi.create({ id, name: `${editForm.name.slice(0, 248)} (copy)`, category: editForm.category, encrypted_data }, user.vault_salt);
+        if (!liveVault()) return;
+        applyOptimisticMutation(null, { ...data, decrypted: payload });
+        setShowEditModal(false);
+        setEditForm(null);
+        setEditBase(null);
+        setEditConflict(false);
+        invalidateCachedViews();
+        void refreshCurrentView().catch(() => {});
+      }, 'Saved as a separate item', { getError: writeError });
+    } finally { setUpdatingItem(false); }
+  }, [applyOptimisticMutation, buildEncryptedPayload, cryptoKey, editBase, editForm, invalidateCachedViews, liveVault, refreshCurrentView, user, writeError]);
 
   const handleDelete = useCallback(async (id: string, onAfterDelete?: () => void) => {
     if (deletingId) return;
@@ -312,27 +420,26 @@ export default function Page() {
         'Moving item to trash...',
         async () => {
           const previousItem = getKnownItemById(id);
-          await vaultApi.delete(id);
-          if (previousItem) {
-            applyOptimisticMutation(previousItem, {
-              ...previousItem,
-              is_deleted: true,
-              deleted_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            });
-          } else {
-            await refreshCurrentView(page);
-          }
+          if (!previousItem || !user) throw new Error('Reload this item before deleting');
+          await vaultApi.delete(previousItem, user.vault_salt);
+          if (!liveVault()) return;
+          applyOptimisticMutation(previousItem, {
+            ...previousItem,
+            revision: previousItem.revision + 1,
+            is_deleted: true,
+            deleted_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
           if (currentSelectionRef.current === id) {
             clearSelection();
             onAfterDelete?.();
           }
         },
         'Moved item to trash',
-        { fallbackError: 'Failed to move item to trash' },
+        { getError: writeError },
       );
     } finally { setDeletingId(null); }
-  }, [applyOptimisticMutation, clearSelection, deletingId, getKnownItemById, page, refreshCurrentView]);
+  }, [applyOptimisticMutation, clearSelection, deletingId, getKnownItemById, liveVault, user, writeError]);
 
   const handleToggleFav = useCallback(async (item: VaultItem) => {
     const adding = !item.is_favourite;
@@ -340,7 +447,9 @@ export default function Page() {
       adding ? 'Adding to favourites...' : 'Removing from favourites...',
       async () => {
         const previousItem = selectedItem?.id === item.id ? selectedItem : item;
-        const { data } = await vaultApi.update(item.id, { is_favourite: adding });
+        if (!user) return;
+        const { data } = await vaultApi.update(previousItem, { is_favourite: adding }, user.vault_salt);
+        if (!liveVault()) return;
         const updated = { ...previousItem, ...data };
         updateVaultItem(item.id, updated);
         if (currentSelectionRef.current === item.id) {
@@ -351,9 +460,9 @@ export default function Page() {
         applyOptimisticMutation(previousItem, updated);
       },
       adding ? 'Added to favourites' : 'Removed from favourites',
-      { fallbackError: 'Failed to update favourite' },
+      { getError: writeError },
     );
-  }, [applyOptimisticMutation, clearSelection, selectedItem, updateVaultItem]);
+  }, [applyOptimisticMutation, clearSelection, liveVault, selectedItem, updateVaultItem, user, writeError]);
 
   const copyToClipboard = useCallback(async (text: string, label: string) => {
     try {
@@ -414,8 +523,9 @@ export default function Page() {
     }
   }, []);
 
-  const handleChangeMasterPassword = useCallback(async (e: React.SyntheticEvent) => {
+  const handleChangeMasterPassword = useCallback(async (e: React.SyntheticEvent, rotate = false) => {
     e.preventDefault();
+    if (masterPasswordSaving) return;
     if (!cryptoKey || !user) {
       toastService.error('Unlock the vault before changing the master password');
       return;
@@ -424,45 +534,70 @@ export default function Page() {
       toastService.error('Enter your current master password');
       return;
     }
-    if (!masterPasswordForm.password || masterPasswordForm.password !== masterPasswordForm.confirm) {
+    if (!rotate && (!masterPasswordForm.password || masterPasswordForm.password !== masterPasswordForm.confirm)) {
       toastService.error('Master password confirmation does not match');
       return;
     }
 
     setMasterPasswordSaving(true);
     try {
-      const currentVerifier = await deriveMasterPasswordVerifier(masterPasswordForm.current_password, user.vault_salt);
-      const newSalt = generateSaltHex();
-      const nextKey = await deriveKey(masterPasswordForm.password, newSalt);
-      const nextVerifier = await deriveMasterPasswordVerifier(masterPasswordForm.password, newSalt);
-      const { data } = await vaultApi.export(true);
-      const items = await Promise.all(
-        (data.items as Array<{ id: string; encrypted_data: string }>).map(async (item) => {
-          const payload = await decryptData(item.encrypted_data, cryptoKey);
-          const encrypted_data = await encryptData(payload, nextKey);
-          return { id: item.id, encrypted_data };
-        }),
-      );
+      const currentVerifier = await deriveMasterPasswordVerifier(masterPasswordForm.current_password, user.vault_salt, user.key_envelope ? 2 : 1);
+      // Verify the current password before preparing a potentially expensive migration.
+      await authApi.unlock(currentVerifier);
+      const password = rotate ? masterPasswordForm.current_password : masterPasswordForm.password;
+      let keyEnvelope;
+      let items: Array<{ id: string; revision: number; encrypted_data: string }> = [];
+      if (user.key_envelope && !rotate) {
+        keyEnvelope = await rewrapVaultKey(masterPasswordForm.current_password, password, user.key_envelope);
+      } else {
+        const created = await createVaultKey(password, user.key_envelope?.vault_id);
+        keyEnvelope = created.envelope;
+        const { data } = await vaultApi.export(true);
+        if (data.vault_salt !== user.vault_salt) throw new Error('Vault password changed. Unlock again before changing it.');
+        items = await Promise.all((data.items as Array<{ id: string; revision: number; encrypted_data: string }>).map(async item => {
+          const payload = await decryptData(item.encrypted_data, cryptoKey, item.id);
+          return { id: item.id, revision: item.revision, encrypted_data: await encryptData(payload, created.key, item.id) };
+        }));
+      }
+      if (!liveVault()) throw new Error('Vault locked during key preparation');
+      const newSalt = keyEnvelope.salt;
+      const nextVerifier = await deriveMasterPasswordVerifier(password, newSalt, 2);
+      if (!liveVault()) throw new Error('Vault locked during key preparation');
       const { data: updatedUser } = await authApi.changeMasterPassword({
         current_master_password_verifier: currentVerifier,
         new_vault_salt: newSalt,
         new_master_password_verifier: nextVerifier,
         master_hint: masterPasswordForm.master_hint || null,
         items,
+        key_envelope: keyEnvelope,
       });
+      if (useAuthStore.getState().user?.id !== user.id) return;
       setUser(updatedUser);
       emitAuthEvent('user-updated', updatedUser);
       setMasterPasswordForm({ current_password: '', password: '', confirm: '', master_hint: updatedUser.master_hint ?? '' });
       lockVault();
       emitAuthEvent('lock');
       setShowSettingsModal(false);
-      toastService.success('Master password changed. Unlock with the new password.');
+      toastService.success(rotate ? 'Vault encryption updated. Unlock with your master password.' : 'Master password changed. Unlock with the new password.');
     } catch (err) {
+      // A transaction may have committed even when its response was lost.
+      // Refresh the wrapper/salt before allowing another key operation.
+      try {
+        const { data } = await authApi.me();
+        if (data.id === user.id && useAuthStore.getState().user?.id === user.id && data.vault_salt !== user.vault_salt) {
+          setUser(data);
+          emitAuthEvent('user-updated', data);
+          lockVault();
+          setShowSettingsModal(false);
+          toastService.info('Vault protection changed. Unlock with its current master password.');
+          return;
+        }
+      } catch { /* The session interceptor handles confirmed revocation. */ }
       toastService.error(getSessionAwareError(err, 'Failed to change master password'));
     } finally {
       setMasterPasswordSaving(false);
     }
-  }, [cryptoKey, lockVault, masterPasswordForm, setUser, user]);
+  }, [cryptoKey, liveVault, lockVault, masterPasswordForm, masterPasswordSaving, setUser, user]);
 
   const handleDeleteAccount = useCallback(async (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -476,7 +611,7 @@ export default function Page() {
     }
     setDeletingAccount(true);
     try {
-      const verifier = await deriveMasterPasswordVerifier(deletePassword, user.vault_salt);
+      const verifier = await deriveMasterPasswordVerifier(deletePassword, user.vault_salt, user.key_envelope ? 2 : 1);
       await authApi.deleteAccount(verifier);
       emitAuthEvent('logout');
       logout();
@@ -493,20 +628,18 @@ export default function Page() {
       'Restoring item...',
       async () => {
         const previousItem = getKnownItemById(id);
-        const { data } = await vaultApi.restore(id);
+        if (!previousItem || !user) throw new Error('Reload this item before restoring');
+        const { data } = await vaultApi.restore(previousItem, user.vault_salt);
+        if (!liveVault()) return;
         if (currentSelectionRef.current === id) {
           clearSelection();
         }
-        if (previousItem) {
-          applyOptimisticMutation(previousItem, data);
-        } else {
-          await refreshCurrentView(page);
-        }
+        applyOptimisticMutation(previousItem, data);
       },
       'Restored item',
-      { fallbackError: 'Failed to restore item' },
+      { getError: writeError },
     );
-  }, [applyOptimisticMutation, clearSelection, getKnownItemById, page, refreshCurrentView]);
+  }, [applyOptimisticMutation, clearSelection, getKnownItemById, liveVault, user, writeError]);
 
   const handleDeletePermanent = useCallback(async (id: string) => {
     if (deletingId) return false;
@@ -516,23 +649,21 @@ export default function Page() {
         'Item deleting permanently...',
         async () => {
           const previousItem = getKnownItemById(id);
-          await vaultApi.deletePermanent(id);
+          if (!previousItem || !user) throw new Error('Reload this item before deleting');
+          await vaultApi.deletePermanent(previousItem, user.vault_salt);
+          if (!liveVault()) return false;
           if (currentSelectionRef.current === id) clearSelection();
-          if (previousItem) {
-            applyOptimisticMutation(previousItem, null);
-          } else {
-            await refreshCurrentView(page);
-          }
+          applyOptimisticMutation(previousItem, null);
           return true;
         },
         'Item permanently deleted',
-        { fallbackError: 'Failed to permanently delete item' },
+        { getError: writeError },
       );
       return deleted === true;
     } finally {
       setDeletingId(null);
     }
-  }, [applyOptimisticMutation, clearSelection, deletingId, getKnownItemById, page, refreshCurrentView]);
+  }, [applyOptimisticMutation, clearSelection, deletingId, getKnownItemById, liveVault, user, writeError]);
 
   const handlePageChange = useCallback(async (newPage: number) => {
     if (newPage === page) return;
@@ -593,6 +724,14 @@ export default function Page() {
 
   const handleOpenSettings = useCallback(() => setShowSettingsModal(true), []);
   const handleCloseSettings = useCallback(() => setShowSettingsModal(false), []);
+  const handleOpenImport = useCallback(() => setShowImportModal(true), []);
+  const handleImported = () => {
+    invalidateCachedViews();
+    clearSelection();
+    void refreshCurrentView(1).catch(() => {
+      toastService.error('Items were imported. Reload the vault to refresh the list.');
+    });
+  };
 
   if (sessionLoading) return <FullScreenMessage message="Loading..." />;
 
@@ -612,13 +751,13 @@ export default function Page() {
   return (
     <>
       <MainDashboard
-        user={user}
         category={category}
         setCategory={handleCategoryChange}
         searchValue={search}
         searchError={searchError}
         onSearchChange={handleSearchChange}
         handleExport={handleExport}
+        onImport={handleOpenImport}
         onOpenSettings={handleOpenSettings}
         onToggleFavourites={handleToggleFavourites}
         onToggleTrash={handleToggleTrash}
@@ -652,6 +791,8 @@ export default function Page() {
         setEditForm={setEditForm}
         updatingItem={updatingItem}
         handleEditItem={handleEditItem}
+        editRevision={editBase?.revision}
+        editConflict={editConflict ? { onReload: reloadConflictedItem, onSaveCopy: saveConflictedCopy } : undefined}
         filteredItems={vaultItems}
         page={page}
         totalPages={totalPages}
@@ -675,8 +816,13 @@ export default function Page() {
           onSaveProfile={handleSaveProfile}
           onResendVerification={handleResendVerification}
           onChangeMasterPassword={handleChangeMasterPassword}
+          onRotateKey={(event) => handleChangeMasterPassword(event, true)}
           onDeleteAccount={handleDeleteAccount}
         />
+      )}
+      {showImportModal && (
+        <ImportVaultModal key={`${user?.id}:${user?.vault_salt}`}
+          onClose={() => setShowImportModal(false)} onImported={handleImported} />
       )}
     </>
   );
