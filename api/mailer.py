@@ -21,12 +21,7 @@ def build_app_url(path: str) -> str:
 
 def send_email(recipient: str, subject: str, text: str) -> bool:
     if not SMTP_HOST:
-        logger.warning(
-            "SMTP not configured. Intended email to %s with subject %r:\n%s",
-            recipient,
-            subject,
-            text,
-        )
+        logger.warning("SMTP not configured; email was not sent")
         return False
 
     message = EmailMessage()
