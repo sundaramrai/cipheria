@@ -95,7 +95,12 @@ export function Modal({ children, onClose, title, icon, closeDisabled = false }:
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!dialog.open) dialog.showModal();
     titleRef.current?.focus();
-    const handleCancel = (e: Event) => { e.preventDefault(); if (!closeDisabledRef.current) onCloseRef.current(); };
+    const handleCancel = (e: Event) => {
+      // File inputs also emit bubbling cancel events when their picker is dismissed.
+      if (e.target !== dialog) return;
+      e.preventDefault();
+      if (!closeDisabledRef.current) onCloseRef.current();
+    };
     const handleBackdropClick = (e: MouseEvent) => { if (e.target === dialog && !closeDisabledRef.current) onCloseRef.current(); };
     dialog.addEventListener('cancel', handleCancel);
     dialog.addEventListener('click', handleBackdropClick);
@@ -308,9 +313,9 @@ function IdentityFormFields({ form, setForm }: Readonly<{ form: ItemForm; setFor
 }
 
 /* Shared form body */
-function ItemFormBody({ form, setForm, submitLabel, submitting, onClose }: Readonly<{
+function ItemFormBody({ form, setForm, submitLabel, submitting, onClose, saveDisabled = false }: Readonly<{
   form: ItemForm; setForm: (f: ItemForm) => void;
-  submitLabel: string; submitting: boolean; onClose: () => void;
+  submitLabel: string; submitting: boolean; onClose: () => void; saveDisabled?: boolean;
 }>) {
   const field = useFormField(form, setForm);
   const handleCategoryChange = useCallback((v: ItemForm['category']) => setForm({ ...form, category: v }), [form, setForm]);
@@ -347,7 +352,7 @@ function ItemFormBody({ form, setForm, submitLabel, submitting, onClose }: Reado
         <button type="button" className="btn-ghost" onClick={onClose} style={{ flex: 1, minHeight: 44 }}>
           Cancel
         </button>
-        <button type="submit" className="btn-primary" disabled={submitting} style={{ flex: 2, minHeight: 44 }}>
+        <button type="submit" className="btn-primary" disabled={submitting || saveDisabled} style={{ flex: 2, minHeight: 44 }}>
           {submitting ? 'Saving…' : submitLabel}
         </button>
       </div>
@@ -356,13 +361,14 @@ function ItemFormBody({ form, setForm, submitLabel, submitting, onClose }: Reado
 }
 
 /* Modal exports */
-interface ItemModalProps {
+export interface ItemModalProps {
   form: ItemForm;
   setForm: (f: ItemForm) => void;
   saving: boolean;
   onSubmit: (e: React.SyntheticEvent) => void;
   onClose: () => void;
   mode: 'add' | 'edit';
+  conflict?: { onReload: () => void; onSaveCopy: () => void };
 }
 
 const MODAL_CONFIG = {
@@ -370,7 +376,7 @@ const MODAL_CONFIG = {
   edit: { title: 'Edit Item', submitLabel: 'Save Changes', icon: <Edit2 size={14} color="var(--accent)" /> },
 } as const;
 
-export function ItemModal({ form, setForm, saving, onSubmit, onClose, mode }: Readonly<ItemModalProps>) {
+export function ItemModal({ form, setForm, saving, onSubmit, onClose, mode, conflict }: Readonly<ItemModalProps>) {
   const { title, submitLabel, icon } = MODAL_CONFIG[mode];
   const [initialForm] = useState(() => ({ ...form }));
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -396,11 +402,19 @@ export function ItemModal({ form, setForm, saving, onSubmit, onClose, mode }: Re
   return (
     <>
       <Modal onClose={requestClose} title={title} icon={icon} closeDisabled={saving}>
+        {conflict && <div role="alert" className="mb-5 rounded-lg border border-(--border) p-4 text-sm leading-6">
+          <p>This item changed elsewhere or was deleted. Your edits are still here.</p>
+          <p className="text-(--text-secondary)">Save a separate item to keep your edits, or discard them and reload the latest version.</p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button type="button" className="btn-ghost" disabled={saving} onClick={conflict.onReload}>Discard edits and reload</button>
+            <button type="button" className="btn-primary" disabled={saving} onClick={conflict.onSaveCopy}>Save as a separate item</button>
+          </div>
+        </div>}
         <form onSubmit={onSubmit} autoComplete="off">
           <fieldset disabled={saving} className="m-0 min-w-0 border-0 p-0">
             <ItemFormBody
               form={form} setForm={setForm}
-              submitLabel={submitLabel} submitting={saving} onClose={requestClose}
+              submitLabel={submitLabel} submitting={saving} saveDisabled={Boolean(conflict)} onClose={requestClose}
             />
           </fieldset>
         </form>
