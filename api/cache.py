@@ -4,9 +4,9 @@ Redis-backed cache helpers.
 Key families:
   user:{id}                              15 min
   vault:list:ver:{user_id}              monotonic version counter
-  vault:list:{user_id}:{ver}:{hash}      5 min
+  vault:list:v2:{user_id}:{ver}:{hash}   5 min
   vault:sidebar:{user_id}:{ver}          5 min
-  vault:item:{user_id}:{item_id}        10 min
+  vault:item:v2:{user_id}:{item_id}     10 min
 """
 
 import hashlib
@@ -136,7 +136,7 @@ def _vault_list_key(
     version = _get_vault_list_version(user_id)
     params = f"{category}:{search}:{favourites_only}:{deleted_only}:{page}:{page_size}"
     params_hash = hashlib.md5(params.encode()).hexdigest()[:12]
-    return f"vault:list:{user_id}:{version}:{params_hash}"
+    return f"vault:list:v2:{user_id}:{version}:{params_hash}"
 
 
 def _sidebar_counts_key(user_id: str) -> str:
@@ -197,20 +197,20 @@ def invalidate_vault_list(user_id: str) -> None:
 
 
 def get_cached_vault_item(user_id: str, item_id: str) -> dict | None:
-    return _get(f"vault:item:{user_id}:{item_id}")
+    return _get(f"vault:item:v2:{user_id}:{item_id}")
 
 
 def set_cached_vault_item(user_id: str, item_id: str, data: dict) -> None:
-    _set(f"vault:item:{user_id}:{item_id}", data, TTL_VAULT_ITEM)
+    _set(f"vault:item:v2:{user_id}:{item_id}", data, TTL_VAULT_ITEM)
 
 
 def invalidate_vault_item(user_id: str, item_id: str) -> None:
-    _delete(f"vault:item:{user_id}:{item_id}")
+    _delete(f"vault:item:v2:{user_id}:{item_id}")
 
 
 def invalidate_all_vault(user_id: str) -> None:
     _bump_vault_list_version(user_id)
-    _delete_pattern(f"vault:item:{user_id}:*")
+    _delete_pattern(f"vault:item:v2:{user_id}:*")
 
 
 def cache_ping() -> bool:
