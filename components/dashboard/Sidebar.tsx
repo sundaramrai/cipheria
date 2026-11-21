@@ -1,9 +1,9 @@
 'use client';
-import { Archive, ArrowLeft, Key, Settings, Shield, Download, Lock, LogOut, Star } from 'lucide-react';
+import { Archive, ArrowLeft, Key, Settings, Shield, Download, Upload, Lock, LogOut, Star } from 'lucide-react';
 import { ITEM_CATEGORIES } from './types';
 import type { Category } from './types';
 import { useSignOut } from './hooks/useSignOut';
-import type { SidebarCounts, UserProfile, VaultItem } from '@/lib/types';
+import type { SidebarCounts, VaultItem } from '@/lib/types';
 
 const NAV_ITEMS = [
   { id: 'all', label: 'All Items', icon: Shield },
@@ -11,11 +11,11 @@ const NAV_ITEMS = [
 ] as const;
 
 interface DesktopSidebarProps {
-  user: Pick<UserProfile, 'email'> | null;
   category: Category;
   sidebarCounts: SidebarCounts;
   setCategory: (c: Category) => void;
   handleExport: () => void;
+  onImport: () => void;
   lockVault: () => void;
   handleLogout: () => Promise<void>;
   onOpenSettings: () => void;
@@ -25,7 +25,7 @@ interface DesktopSidebarProps {
   isTrashView: boolean;
 }
 
-export function DesktopSidebar({ user, category, sidebarCounts, setCategory, handleExport, lockVault, handleLogout, onOpenSettings, onToggleFavourites, onToggleTrash, isFavouritesView, isTrashView }: Readonly<DesktopSidebarProps>) {
+export function DesktopSidebar({ category, sidebarCounts, setCategory, handleExport, onImport, lockVault, handleLogout, onOpenSettings, onToggleFavourites, onToggleTrash, isFavouritesView, isTrashView }: Readonly<DesktopSidebarProps>) {
   const { signingOut, handleSignout } = useSignOut(handleLogout);
 
   return (
@@ -67,6 +67,9 @@ export function DesktopSidebar({ user, category, sidebarCounts, setCategory, han
 
       {/* Footer */}
       <div className="mt-3 flex flex-col gap-1 border-t border-(--border) pt-3">
+        <button type="button" onClick={onImport} className="nav-item">
+          <Upload size={13} /> Import Vault
+        </button>
         <button type="button" onClick={handleExport} className="nav-item">
           <Download size={13} /> Export Vault
         </button>
@@ -80,9 +83,6 @@ export function DesktopSidebar({ user, category, sidebarCounts, setCategory, han
           className="nav-item text-(--danger)! disabled:opacity-50">
           <LogOut size={13} /> {signingOut ? 'Signing out…' : 'Sign Out'}
         </button>
-        <p className="truncate px-3 pt-2 text-xs text-(--text-secondary)">
-          {user?.email}
-        </p>
       </div>
     </aside>
   );
