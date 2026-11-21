@@ -1,6 +1,8 @@
 import axios from 'axios';
 import { emitAuthEvent } from '@/lib/authSync';
 import type { AuthSession, PaginatedVaultItems, UserProfile, VaultItem } from '@/lib/types';
+import type { ImportRequest } from '@/lib/vaultImport';
+import type { KeyEnvelope } from '@/lib/vaultKeys';
 
 // Access tokens live in memory and are never persisted to Web Storage.
 let _accessToken: string | null = null;
@@ -25,7 +27,7 @@ let _refreshPromise: Promise<string> | null = null;
 
 const api = axios.create({
   timeout: 15_000,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
   withCredentials: true, // send HttpOnly refresh-token cookie automatically
 });
 
@@ -54,7 +56,10 @@ api.interceptors.response.use(
           // Start a new refresh and clear the mutex only after all awaiting
           // callers have received the token (i.e. after the microtask queue drains).
           const promise = axios
-            .post('/api/auth/refresh', {}, { withCredentials: true })
+            .post('/api/auth/refresh', {}, {
+              withCredentials: true,
+              headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            })
             .then(({ data }) => {
               setAccessToken(data.access_token);
               return data.access_token as string;
@@ -90,16 +95,18 @@ export const authApi = {
     masterPasswordVerifier: string,
     fullName?: string,
     masterHint?: string,
+    keyEnvelope?: KeyEnvelope,
   ) => api.post<AuthSession>('/api/auth/register', {
     email,
     vault_salt: vaultSalt,
     master_password_verifier: masterPasswordVerifier,
     full_name: fullName,
     master_hint: masterHint,
+    key_envelope: keyEnvelope,
   }),
 
   loginChallenge: (email: string) =>
-    api.post<{ vault_salt: string }>('/api/auth/login/challenge', { email }),
+    api.post<{ vault_salt: string; version: 1 | 2 }>('/api/auth/login/challenge', { email }),
 
   login: (email: string, masterPasswordVerifier: string) =>
     api.post<AuthSession>('/api/auth/login', { email, master_password_verifier: masterPasswordVerifier }),
@@ -136,7 +143,8 @@ export const authApi = {
     new_vault_salt: string;
     new_master_password_verifier: string;
     master_hint?: string | null;
-    items: Array<{ id: string; encrypted_data: string }>;
+    items: Array<{ id: string; revision: number; encrypted_data: string }>;
+    key_envelope?: KeyEnvelope;
   }) => api.patch<UserProfile>('/api/auth/master-password', data),
 
   deleteAccount: (masterPasswordVerifier: string) =>
@@ -145,32 +153,49 @@ export const authApi = {
 
 // Vault
 
+function writeHeaders(vaultSalt: string, item?: Pick<VaultItem, 'id' | 'revision'>) {
+  if (!vaultSalt || (item && (!Number.isSafeInteger(item.revision) || item.revision < 1))) {
+    throw new Error('Reload this item before saving');
+  }
+  return {
+    'X-Vault-Salt': vaultSalt,
+    ...(item ? { 'If-Match': `"${item.id}:${item.revision}"` } : {}),
+  };
+}
+
 export const vaultApi = {
+  importJson: (data: ImportRequest, signal?: AbortSignal) =>
+    api.post<{ imported_count: number }>('/api/vault/import/json', data, { signal }),
+
   list: (params?: { category?: string; search?: string; favourites_only?: boolean; deleted_only?: boolean; page?: number; page_size?: number; include_encrypted_data?: boolean }, signal?: AbortSignal) =>
     api.get<PaginatedVaultItems<VaultItem>>('/api/vault', { params, signal }),
 
-  get: (id: string) => api.get<VaultItem>(`/api/vault/${id}`),
+  get: (id: string, fresh = false) => api.get<VaultItem>(`/api/vault/${id}`, { params: fresh ? { fresh: true } : undefined }),
 
   create: (data: {
+    id?: string;
     name: string;
     category: string;
     encrypted_data: string;
     is_favourite?: boolean;
-  }) => api.post<VaultItem>('/api/vault', data),
+  }, vaultSalt: string) => api.post<VaultItem>('/api/vault', data, { headers: writeHeaders(vaultSalt) }),
 
-  update: (id: string, data: Partial<{
+  update: (item: Pick<VaultItem, 'id' | 'revision'>, data: Partial<{
     name: string;
     category: string;
     encrypted_data: string;
     is_favourite: boolean;
-  }>) => api.patch<VaultItem>(`/api/vault/${id}`, data),
+  }>, vaultSalt: string) => api.patch<VaultItem>(`/api/vault/${item.id}`, data, { headers: writeHeaders(vaultSalt, item) }),
 
-  delete: (id: string) => api.delete(`/api/vault/${id}`),
+  delete: (item: Pick<VaultItem, 'id' | 'revision'>, vaultSalt: string) =>
+    api.delete(`/api/vault/${item.id}`, { headers: writeHeaders(vaultSalt, item) }),
 
-  restore: (id: string) => api.post(`/api/vault/${id}/restore`),
+  restore: (item: Pick<VaultItem, 'id' | 'revision'>, vaultSalt: string) =>
+    api.post<VaultItem>(`/api/vault/${item.id}/restore`, {}, { headers: writeHeaders(vaultSalt, item) }),
 
-  deletePermanent: (id: string) => api.delete(`/api/vault/${id}/permanent`),
+  deletePermanent: (item: Pick<VaultItem, 'id' | 'revision'>, vaultSalt: string) =>
+    api.delete(`/api/vault/${item.id}/permanent`, { headers: writeHeaders(vaultSalt, item) }),
 
-  export: (includeDeleted = false) =>
-    api.get('/api/vault/export/json', { params: includeDeleted ? { include_deleted: true } : undefined }),
+  export: (includeDeleted = false, signal?: AbortSignal) =>
+    api.get('/api/vault/export/json', { params: includeDeleted ? { include_deleted: true } : undefined, signal }),
 };
