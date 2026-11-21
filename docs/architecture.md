@@ -60,7 +60,7 @@ The routing layer exposes the frontend and API under one browser origin. In deve
 
 ### Key derivation and payload format
 
-In [lib/crypto.ts](../lib/crypto.ts):
+Legacy accounts in [lib/crypto.ts](../lib/crypto.ts) retain this format until upgrade:
 
 1. PBKDF2-SHA-256 derives 256 bits from the master password and the account's vault salt using 600,000 iterations.
 2. The browser imports those bits as a non-extractable AES-256-GCM `CryptoKey` for vault encryption and decryption.
@@ -68,6 +68,8 @@ In [lib/crypto.ts](../lib/crypto.ts):
 4. Each encryption uses a fresh random 12-byte IV. The stored string is `base64(iv).base64(ciphertextWithAuthenticationTag)`.
 
 The salt is available to the server and is not a secret. A new salt is generated when the master password changes. Changing these derivation parameters or the ciphertext format requires a migration strategy for existing encrypted items and exports.
+
+New accounts use the [version 2 key hierarchy](key-management.md): a random AES-256-GCM data key protected by a password-derived wrapping key, with separate authentication derivation. The nullable `users.key_envelope` holds validated KDF parameters, vault/key IDs and wrapped key. Item authenticated data binds the vault, expected item ID, version and key ID. Ordinary password changes rewrap the same key; explicit rotation or legacy upgrade re-encrypts the complete vault, including Trash, with revision checks. Both export formats remain importable with their original credentials.
 
 The non-extractable key is held in `useAuthStore.cryptoKey`. Browser code with access to the unlocked application can still use that key to decrypt items. `lockVault()` drops the active key and list references; it cannot guarantee erasure of previously allocated JavaScript memory.
 
@@ -103,7 +105,7 @@ The non-extractable key is held in `useAuthStore.cryptoKey`. Browser code with a
 
 ### Registration and login
 
-Registration generates a vault salt in the browser and sends the account details, salt, and derived verifier to the API. Login first obtains the salt through `/auth/login/challenge`, then derives the key and verifier locally. After verifier validation, the API creates a session and returns an access token and profile, and sets the refresh cookie. The browser retains the key in memory.
+Registration generates a random data key and password-protected envelope in the browser and sends the account details, envelope, salt, and derived verifier to the API. Login first obtains the salt and derivation version through `/auth/login/challenge`, then derives the verifier locally. After verifier validation, the API creates a session and returns an access token and profile, and sets the refresh cookie. The browser unwraps the version 2 key using the returned envelope, or derives the legacy key, and retains it in memory.
 
 Authentication and decryption state are separate:
 
@@ -121,7 +123,7 @@ A page reload loses the in-memory access token and key. A valid refresh cookie c
 
 Each `refresh_tokens` row represents one stable session. Access JWTs contain `sub` (account ID), `sid` (session-row ID), token type, and expiry. They last 15 minutes. Refresh JWTs last 30 days; successful rotation replaces the stored token hash and expiry on the same row.
 
-The refresh cookie uses path `/` and is HttpOnly. Production sets `Secure` and `SameSite=None`; development uses `SameSite=Lax` without `Secure`. Deployment must provide the intended environment explicitly.
+The refresh cookie uses path `/`, is host-only and HttpOnly, and uses `SameSite=Lax` in all environments. Production also sets `Secure`. Browser/API traffic is served through the same origin; configure the intended environment explicitly. Unsafe requests require `X-Requested-With: XMLHttpRequest` and any supplied Origin must exactly match the configured allowlist. Failed refresh responses expire the cookie on the actual 401 response. See [the threat model](threat-model.md) for CSP, deployment requirements and remaining risks.
 
 ```mermaid
 sequenceDiagram
@@ -152,11 +154,15 @@ Settings can revoke every other session after master-password verification. Logo
 
 ### Create, read, update, and delete
 
-- **Create/edit:** the browser builds the category-specific JSON payload, encrypts it, and sends ciphertext with listing metadata. The API validates the request and account ownership, commits the change, then invalidates affected caches.
+- **Create/edit:** the browser builds the category-specific JSON payload, encrypts it, and sends ciphertext with listing metadata. Every vault mutation carries `X-Vault-Salt`, bound to the key used by that browser. Existing-item mutations also require a strong `If-Match` value `"<item UUID>:<revision>"`; detail/create/update/restore responses expose that ETag, and list/unlock responses include revisions. A missing precondition returns 428, a stale item revision returns 412, and an obsolete salt returns 409. Ownership is checked before revealing item revision conflicts.
 - **List:** normal list responses contain metadata. Queries apply account ownership, category, favourite, trash, and optional name filters before pagination. Sorting is by `updated_at` descending and item ID ascending to resolve ties.
 - **Open:** clicking an item fetches ciphertext when needed and decrypts it locally. Initial dashboard loads and category changes do not select an item automatically.
-- **Favourite:** changing only favourite state preserves the content timestamp.
+- **Favourite:** changing only favourite state preserves the content timestamp while incrementing the item revision.
 - **Delete/restore:** deletion normally moves an item to trash. Permanent deletion removes it. Trash is still part of the encrypted account data when changing the master password.
+
+All item writers acquire the same account row lock as import and master-password changes, then check the item revision under that lock. Every mutation that retains the item advances its revision; deletion and restoration cannot silently succeed against an outdated item. Permanent deletion requires the item to be in Trash. Write responses are serialized before releasing the transaction lock, so a later writer's revision cannot be attached to an earlier browser's plaintext draft. Vault list/item cache keys use a new namespace to avoid pre-migration entries without revisions. Conflict reloads bypass the item cache using `fresh=true`; a cached old revision can cause a rejected save, but cannot authorize overwriting newer data.
+
+The edit form retains the snapshot and revision from when editing began. A 412 or deleted-item 404 keeps its draft in memory and offers an explicit discard-and-reload or a separately encrypted copy. Locking, logout or an account/key change clears the form and conflict state. Profile changes that replace the account or salt atomically clear the old key; unlock results also check that their source account/salt is still current before installing a key.
 
 The shared store contains the current vault list and key. View caches and the search index belong to `useVaultViews`; selected item and mutation state belong to the dashboard page. Mobile panel navigation belongs to `MainDashboard`. The page's `currentSelectionRef` guards item responses, while `activeViewRef` prevents an older mutation from replacing the list after a category, search, or page change.
 
@@ -181,11 +187,25 @@ Changing a login's saved password prepends the replaced password and replacement
 
 ## Master password changes and exports
 
-For a master password change, the browser derives a verifier from the entered current password, generates a new salt and key, and fetches every item, including trash. It decrypts each complete payload with the active old key and encrypts it with the new key, preserving password history and other payload fields.
+For an ordinary version 2 password change, the browser unwraps the same data key using the current password and rewraps it using a fresh salt and the new password. It submits the new wrapper/verifier without item ciphertext; item revisions remain unchanged. Legacy upgrades and explicit data-key rotations instead fetch every item including Trash, decrypt with the active old key, and encrypt under a newly generated data key while preserving IDs, fields and history.
 
-The API verifies the current-password verifier and checks that the submitted item IDs exactly cover the account's items, then commits the replacement ciphertexts, salt, verifier hash, and revocation of other sessions in one database transaction. Client-side re-encryption happens before that transaction. The API cannot decrypt the supplied ciphertext to verify its contents. The current browser remains authenticated and locks its vault so the user unlocks with the new password.
+The API verifies the current-password verifier under the account lock. For full migrations/rotations it verifies exact item coverage and every source revision before changing ciphertext. A concurrent edit makes the migration fail with 412. Successful migrations atomically replace ciphertext, revisions, wrapper, salt, verifier and other-session revocation. Ordinary rewrapping skips payload queries and item updates while still rotating the salt/verifier and revoking other sessions. Waiting old-key writers recheck the salt after acquiring the lock and are rejected. The API cannot decrypt ciphertext to verify its contents. The initiating browser stays authenticated and locks to require the current password; lost successful responses refresh key metadata before another operation.
 
-Export produces JSON containing the vault salt, account email, item metadata, and ciphertext. Normal exports exclude trash; the master-password-change flow explicitly includes it. Exporting does not decrypt the item payloads or encrypt the surrounding metadata. An export made before a password change still requires the old password and the salt in that file to decrypt. There is currently no export-import or backup-restore UI; restoring an item from Trash is a different operation.
+Export produces JSON containing the salt, account email, item metadata and ciphertext. Version 2 exports also include the protected key envelope; legacy exports retain version 1. Normal exports exclude Trash; full key migrations include it. Exporting does not decrypt payloads or encrypt surrounding metadata. An earlier export still requires its export-time password and captured salt/envelope after a live password change.
+
+### Import and restore
+
+The vault navigation opens `ImportVaultModal` through Import Vault beside Export Vault on desktop, or Import beside Export in the mobile list footer. Account email and verification controls are grouped with the name under Settings → Profile. The import modal accepts password CSVs or Cipheria 1.0 and 2.0 JSON exports up to 2 MiB and 1,000 records/items. `lib/csvImport.ts` uses Papa Parse with string values and a fixed comma delimiter, bounds headers/records, suggests mappings, and reports invalid records without their values. Nonempty unmapped columns require explicit acknowledgement, except documented browser ID/timestamp/form-action metadata. CSV mapping state contains plaintext in browser memory until encryption finishes or the modal is closed; lock/account/key changes cancel processing. Passwords are never trimmed or interpreted as numbers/formulae. Passkeys and OTP secrets are not imported.
+
+For JSON, `lib/vaultImport.ts` validates the file, derives its source key, and decrypts and validates supported payloads locally. Both formats feed `prepareImportItems`, the shared duplicate/encryption pipeline. The final preview retains destination ciphertext and listing metadata rather than plaintext payloads or the entered password. Duplicate comparison happens locally against active destination items and earlier source records; creation dates and favourite state do not affect it, while nonempty password history does. Empty optional fields/history compare equally to absent values. Selection is evaluated before skipping source duplicates, so excluding the first copy does not exclude a later selected copy. No existing item is updated by an import.
+
+`POST /vault/import/json` accepts up to 3 MiB, with an account-scoped operation UUID, expected destination salt, and destination-encrypted items. FastAPI enforces the route body limit while reading, including chunked bodies, before JSON parsing. The endpoint locks the account row, refreshes the ORM user state, validates the expected salt and active-item capacity, and commits new items, a receipt, and an audit event together. IDs are generated for the destination. Export timestamps are preserved, but trash state is not encoded in the legacy file, so restored items are active.
+
+`vault_imports` stores the operation ID, owner, request hash, count, and timestamp. Repeating an identical committed operation returns its count without inserting more items. Reusing its ID with different content returns 409. Receipts contain no source password or decrypted payload and remain until account deletion. The client keeps the exact prepared request for retries after a lost response. Aborting browser work cannot retract a request that has already committed.
+
+Password changes and account deletion share the account-row lock with imports. Item creation and trash restoration also take that lock to serialize capacity increases. If a password change commits first, an old-salt import is rejected. If import commits first, a password change prepared without those items fails its complete-item coverage check. Exports take the same lock to obtain a matching salt/ciphertext snapshot during password rotation. Per-item revision checks also reject stale edits, favourites, trash, restore and permanent deletion.
+
+Preparation is cancelled on modal close, lock, logout, or account/key changes. Abort checks after asynchronous work discard late results. Only destination ciphertext and the existing listing metadata are transmitted. Both CSV and JSON submit the same JSON request to the same endpoint; CSV adds no backend table or route. Independently password-protected backup formats remain future work; restoring an item from Trash is a different operation.
 
 ## Persistence and caching
 
@@ -198,6 +218,7 @@ Export produces JSON containing the vault salt, account email, item metadata, an
 | `refresh_tokens` | Stable sessions, hashed refresh tokens, expiry, revocation |
 | `auth_tokens` | Hashed, expiring action tokens such as email verification |
 | `audit_logs` | Account security actions and request metadata |
+| `vault_imports` | Account-scoped receipts that prevent import retries from inserting duplicate batches |
 
 [Pydantic schemas](../api/schemas.py) separate `VaultItemSummary` from `VaultItemResponse`, which adds `encrypted_data`. `UnlockedVaultResponse` adds required sidebar counts to the paginated response. PostgreSQL changes live in [alembic/versions](../alembic/versions/); for example, [0007_remove_favicons.py](../alembic/versions/0007_remove_favicons.py) drops the persisted `favicon_url` column, and its downgrade recreates the column without recovering deleted URLs.
 
