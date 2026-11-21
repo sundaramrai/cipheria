@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
@@ -8,8 +9,19 @@ HEX_64_REGEX = "^[0-9a-fA-F]{64}$"
 
 # Auth
 
+class KeyEnvelope(BaseModel):
+    model_config = {"extra": "forbid"}
+    version: Literal[2]
+    vault_id: UUID
+    key_id: UUID
+    kdf: Literal["PBKDF2-SHA256"]
+    iterations: Literal[600000]
+    salt: str = Field(..., pattern="^[a-f0-9]{64}$")
+    wrapped_key: str = Field(..., pattern=r"^[A-Za-z0-9+/]{16}\.[A-Za-z0-9+/]{64}$")
+
 class RegisterRequest(BaseModel):
     email: EmailStr
+    key_envelope: KeyEnvelope | None = None
     vault_salt: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
     master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
     full_name: str | None = Field(None, max_length=128)
@@ -22,6 +34,7 @@ class LoginChallengeRequest(BaseModel):
 
 class LoginChallengeResponse(BaseModel):
     vault_salt: str
+    version: Literal[1, 2] = 1
 
 
 class LoginRequest(BaseModel):
@@ -38,12 +51,12 @@ class UserResponse(BaseModel):
     email: str
     full_name: str | None = None
     vault_salt: str
+    key_envelope: KeyEnvelope | None = None
     master_hint: str | None = None
     email_verified: bool = False
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class TokenResponse(BaseModel):
@@ -69,6 +82,7 @@ class UpdateProfileRequest(BaseModel):
 
 class MasterPasswordItemUpdate(BaseModel):
     id: UUID
+    revision: int = Field(..., ge=1)
     encrypted_data: str = Field(..., min_length=1, max_length=100_000)
 
 
@@ -77,7 +91,8 @@ class ChangeMasterPasswordRequest(BaseModel):
     new_vault_salt: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
     new_master_password_verifier: str = Field(..., min_length=64, max_length=64, pattern=HEX_64_REGEX)
     master_hint: str | None = Field(None, max_length=256)
-    items: list[MasterPasswordItemUpdate]
+    items: list[MasterPasswordItemUpdate] = Field(default_factory=list)
+    key_envelope: KeyEnvelope | None = None
 
 
 class DeleteAccountRequest(BaseModel):
@@ -91,6 +106,7 @@ class VerifyMasterPasswordRequest(BaseModel):
 # Vault Items
 
 class VaultItemCreate(BaseModel):
+    id: UUID | None = None
     name: str = Field(..., min_length=1, max_length=255)
     category: str = Field(default="login", pattern="^(login|card|note|identity)$")
     encrypted_data: str = Field(..., min_length=1, max_length=100_000)
@@ -104,9 +120,30 @@ class VaultItemUpdate(BaseModel):
     is_favourite: bool | None = None
 
 
+class VaultImportItem(VaultItemCreate):
+    model_config = {"extra": "forbid"}
+    encrypted_data: str = Field(
+        ..., max_length=100_000,
+        pattern=r"^(v2\.)?[A-Za-z0-9+/]{16}\.[A-Za-z0-9+/]+={0,2}$",
+    )
+    created_at: datetime
+
+
+class VaultImportRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    operation_id: UUID
+    destination_salt: str = Field(..., pattern=HEX_64_REGEX)
+    items: list[VaultImportItem] = Field(..., min_length=1, max_length=1000)
+
+
+class VaultImportResponse(BaseModel):
+    imported_count: int
+
+
 class VaultItemSummary(BaseModel):
     # Metadata only — no encrypted_data, used by list endpoint
     id: UUID
+    revision: int
     name: str
     category: str
     is_favourite: bool
@@ -115,8 +152,7 @@ class VaultItemSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class VaultItemResponse(VaultItemSummary):
