@@ -48,7 +48,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         cache_patch.start()
         self.addCleanup(cache_patch.stop)
 
-    async def request(self, app, path, method="GET", body=None):
+    async def request(self, app, path, method="GET", body=None, headers=None):
         messages = []
         body_sent = False
 
@@ -70,7 +70,9 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
             "method": method, "scheme": "http", "path": path,
             "raw_path": path.encode(), "query_string": b"", "root_path": "",
-            "headers": [(b"content-type", b"application/json")],
+            "headers": [(b"content-type", b"application/json"), *(headers if headers is not None else [
+                (b"x-requested-with", b"XMLHttpRequest"), (b"origin", b"http://localhost:3000"),
+            ])],
             "client": ("127.0.0.1", 12345), "server": ("localhost", 8000),
             "http_version": "1.1",
         }
@@ -121,3 +123,55 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_vercel_health_also_accepts_an_already_stripped_path(self):
         status, _, _ = await self.request(self.vercel_app, "/health")
         self.assertEqual(status, 200)
+
+    async def test_vercel_login_challenge_also_accepts_an_already_stripped_path(self):
+        status, _, body = await self.request(
+            self.vercel_app, "/auth/login/challenge", "POST", {"email": "person@example.com"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["vault_salt"], "existing-test-vault-salt")
+
+    async def test_unsafe_requests_rejected_before_database_access(self):
+        for headers in (
+            [],
+            [(b"origin", b"http://localhost:3000")],
+            [(b"x-requested-with", b"XMLHttpRequest"), (b"origin", b"https://attacker.test")],
+            [(b"x-requested-with", b"XMLHttpRequest"), (b"origin", b"null")],
+            [(b"x-requested-with", b"XMLHttpRequest"), (b"sec-fetch-site", b"cross-site")],
+        ):
+            with self.subTest(headers=headers):
+                status, response_headers, _ = await self.request(
+                    self.vercel_app, "/api/auth/login/challenge", "POST",
+                    {"email": "person@example.com"}, headers=headers,
+                )
+                self.assertEqual(status, 403)
+                self.assertEqual(response_headers[b"cache-control"], b"no-store")
+        self.db.query.assert_not_called()
+
+    async def test_explicit_nonbrowser_client_and_safe_health(self):
+        status, _, _ = await self.request(
+            self.local_app, "/auth/login/challenge", "POST", {"email": "person@example.com"},
+            headers=[(b"x-requested-with", b"XMLHttpRequest")],
+        )
+        self.assertEqual(status, 200)
+        status, headers, _ = await self.request(self.local_app, "/health", headers=[])
+        self.assertEqual(status, 200)
+        self.assertEqual(headers[b"cache-control"], b"no-store")
+        self.assertEqual(headers[b"x-content-type-options"], b"nosniff")
+
+    async def test_cors_preflight_accepts_only_configured_origin(self):
+        for origin, expected in [(b"http://localhost:3000", 200), (b"https://attacker.test", 400)]:
+            status, headers, _ = await self.request(self.local_app, "/auth/refresh", "OPTIONS", headers=[
+                (b"origin", origin), (b"access-control-request-method", b"POST"),
+                (b"access-control-request-headers", b"x-requested-with,content-type"),
+            ])
+            self.assertEqual(status, expected)
+            if expected == 200:
+                self.assertEqual(headers[b"access-control-allow-origin"], origin)
+
+    async def test_rejected_refresh_actually_deletes_cookie_on_wire(self):
+        status, headers, _ = await self.request(self.local_app, "/auth/refresh", "POST")
+        self.assertEqual(status, 401)
+        self.assertIn(b"Max-Age=0", headers[b"set-cookie"])
+        self.assertIn(b"HttpOnly", headers[b"set-cookie"])
+        self.assertIn(b"SameSite=lax", headers[b"set-cookie"])
