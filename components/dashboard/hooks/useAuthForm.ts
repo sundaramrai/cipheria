@@ -5,7 +5,8 @@ import { toastService } from '@/lib/toast';
 import { parseApiError } from '@/lib/errors';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
-import { deriveKey, deriveMasterPasswordVerifier, generateSaltHex } from '@/lib/crypto';
+import { deriveKey, deriveMasterPasswordVerifier } from '@/lib/crypto';
+import { createVaultKey, unlockKey } from '@/lib/vaultKeys';
 
 type Tab = 'login' | 'register';
 
@@ -63,15 +64,16 @@ export function useAuthForm(initialTab: Tab = 'login') {
                     toastService.error('Master password confirmation does not match');
                     return;
                 }
-                const vaultSalt = generateSaltHex();
-                const key = await deriveKey(form.masterPassword, vaultSalt);
-                const masterPasswordVerifier = await deriveMasterPasswordVerifier(form.masterPassword, vaultSalt);
+                const { envelope, key } = await createVaultKey(form.masterPassword);
+                const vaultSalt = envelope.salt;
+                const masterPasswordVerifier = await deriveMasterPasswordVerifier(form.masterPassword, vaultSalt, 2);
                 const { data } = await authApi.register(
                     form.email,
                     vaultSalt,
                     masterPasswordVerifier,
                     form.fullName,
                     form.masterHint,
+                    envelope,
                 );
                 completeAuth(data.user, data.access_token, key);
                 toastService.success('Account created. Check your email to verify the account.');
@@ -81,9 +83,10 @@ export function useAuthForm(initialTab: Tab = 'login') {
                     return;
                 }
                 const { data: challenge } = await authApi.loginChallenge(form.email);
-                const key = await deriveKey(form.masterPassword, challenge.vault_salt);
-                const masterPasswordVerifier = await deriveMasterPasswordVerifier(form.masterPassword, challenge.vault_salt);
+                const masterPasswordVerifier = await deriveMasterPasswordVerifier(form.masterPassword, challenge.vault_salt, challenge.version);
                 const { data } = await authApi.login(form.email, masterPasswordVerifier);
+                const key = data.user.key_envelope ? await unlockKey(form.masterPassword, data.user.key_envelope)
+                    : await deriveKey(form.masterPassword, data.user.vault_salt);
                 completeAuth(data.user, data.access_token, key);
                 toastService.success('Welcome back!');
             }
