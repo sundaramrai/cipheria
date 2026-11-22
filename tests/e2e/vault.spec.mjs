@@ -56,6 +56,7 @@ test('registration, locked reload, CRUD, import/export, and revoking another ses
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/auth');
   await page.getByRole('button', { name: 'Create Account', exact: true }).click();
+  await page.locator('#confirmMasterPassword').waitFor();
   await page.locator('#email').fill(email);
   await page.locator('#masterPassword').fill(master);
   await page.locator('#confirmMasterPassword').fill(master);
@@ -78,10 +79,27 @@ test('registration, locked reload, CRUD, import/export, and revoking another ses
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Account Settings', exact: true });
-  await settings.getByRole('button', { name: 'Rotate vault key', exact: true }).click();
-  const notice = page.locator('[role="status"]').filter({ hasText: 'Enter your current master password' });
+  await expect(settings.getByRole('button', { name: 'Save profile', exact: true })).toBeDisabled();
+  await expect(settings.getByRole('textbox', { name: 'Email', exact: true })).toHaveCount(0);
+  await settings.getByLabel('Full name', { exact: true }).fill('Unsaved synthetic name');
+  await page.keyboard.press('Escape');
+  await expect(settings.getByText('Discard unsaved changes?', { exact: true })).toBeVisible();
+  await settings.getByRole('button', { name: 'Discard and close', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await settings.getByRole('tab', { name: 'Security', exact: true }).click();
+  await settings.getByRole('button', { name: /^Change master password/ }).click();
+  await settings.getByRole('button', { name: 'Change master password', exact: true }).click();
+  await expect(settings.getByLabel('Current master password', { exact: true })).toBeFocused();
+  await expect(settings.getByText('Enter a new master password', { exact: true })).toBeVisible();
+  await settings.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await settings.getByRole('tab', { name: 'Account', exact: true }).click();
+  await page.route('**/api/auth/verify-email/request', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Synthetic verification outage' }),
+  }), { times: 1 });
+  await settings.getByRole('button', { name: 'Verify email', exact: true }).click();
+  const notice = page.locator('[role="status"]').filter({ hasText: 'Synthetic verification outage' });
   await expect(notice).toHaveCount(1);
-  await expect(settings.getByRole('status').filter({ hasText: 'Enter your current master password' })).toBeVisible();
+  await expect(settings.getByRole('status').filter({ hasText: 'Synthetic verification outage' })).toBeVisible();
   // Hover must reach the toast above the modal and pauses its dismissal timer.
   await notice.hover();
   await page.setViewportSize({ width: 390, height: 844 });
@@ -191,7 +209,9 @@ test('registration, locked reload, CRUD, import/export, and revoking another ses
     await other.locator('button[type=submit]').click();
     await other.waitForURL('**/dashboard');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await page.locator('#settings-session-password').fill(master);
+    await page.getByRole('tab', { name: 'Security', exact: true }).click();
+    await page.getByRole('button', { name: /^Sign out other sessions/ }).click();
+    await page.locator('#settings-sessions-password').fill(master);
     const revoked = page.waitForResponse('**/api/auth/sessions/revoke-others');
     await page.getByRole('button', { name: 'Sign out other sessions', exact: true }).click();
     expect((await revoked).status()).toBe(200);
