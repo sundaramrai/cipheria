@@ -35,15 +35,15 @@ export function useAuthForm(initialTab: Tab = 'login') {
     const router = useRouter();
     const { completeAuth } = useAuthStore();
 
-    const [tab, setTab] = useState<Tab>(initialTab);
+    const tab = initialTab;
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [form, setForm] = useState<AuthForm>(EMPTY_FORM);
 
-    const toggleTab = () => {
-        setTab((t) => (t === 'login' ? 'register' : 'login'));
-        setForm(EMPTY_FORM);
-    };
+    const setTab = (nextTab: Tab) => router.replace(
+        nextTab === 'register' ? '/auth?tab=register' : '/auth', { scroll: false },
+    );
+    const toggleTab = () => setTab(tab === 'login' ? 'register' : 'login');
 
     const togglePassword = () => setShowPassword((v) => !v);
 
