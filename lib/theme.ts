@@ -24,6 +24,9 @@ export function syncThemePreference(theme: ThemePreference) {
   const resolved = resolveThemePreference(theme);
   document.documentElement.dataset.theme = theme;
   document.documentElement.dataset.resolvedTheme = resolved;
+  for (const icon of document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"][href*="favicon.svg"]')) {
+    icon.href = `/favicon.svg#${resolved}`;
+  }
 }
 
 export function applyThemePreference(theme: ThemePreference) {
