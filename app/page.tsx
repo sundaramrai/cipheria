@@ -1,8 +1,9 @@
 'use client';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Analytics } from '@vercel/analytics/next';
 import { SpeedInsights } from '@vercel/speed-insights/next';
-import { Shield, Lock, Key, ArrowRight, RefreshCw, Download, EyeOff, TimerReset } from 'lucide-react';
+import { ArrowRight, Key } from 'lucide-react';
 
 // The scripts can survive client navigation; filter every event, including vitals.
 function publicPageEvent<T extends { url: string }>(event: T): T | null {
@@ -13,138 +14,113 @@ function publicPageEvent<T extends { url: string }>(event: T): T | null {
 
 export default function Page() {
   return (
-    <main style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', background: 'var(--bg)', position: 'relative' }}>
-
-      <style>{`
-        .nav-wrap { padding: 0 clamp(20px, 4vw, 48px); height: 58px; }
-        .nav-link {
-          font-size: 0.82rem; padding: 7px 14px; border-radius: 8px;
-          font-family: var(--font-body); white-space: nowrap;
-          text-decoration: none; transition: all 0.18s;
-          display: inline-flex; align-items: center;
-        }
-        .nav-link-ghost { color: var(--text-secondary); border: 1px solid var(--border); }
-        .nav-link-ghost:hover { color: var(--text-primary); border-color: var(--border-hover); background: var(--accent-dim); }
-        .nav-link-primary { background: var(--accent); color: var(--accent-ink); font-weight: 600; letter-spacing: 0.02em; gap: 6px; }
-        .nav-link-primary:hover { background: var(--accent-hover); box-shadow: 0 4px 16px var(--accent-shadow-strong); }
-        .hero-ctas { flex-direction: column; width: 100%; max-width: 340px; }
-        @media (min-width: 480px) {
-          .hero-ctas { flex-direction: row; width: auto; max-width: none; }
-          .hero-ctas a { width: auto !important; }
-        }
-        @media (min-width: 640px) {
-          .feature-card-inner { flex-direction: column !important; }
-          .feature-icon { margin-bottom: 18px !important; margin-top: 0 !important; }
-        }
-        .features-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
-        @media (min-width: 560px) { .features-grid { grid-template-columns: 1fr 1fr; } }
-        @media (min-width: 900px) { .features-grid { grid-template-columns: repeat(3, 1fr); } }
-      `}</style>
-
-      {/* Nav */}
-      <nav className="nav-wrap" style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        borderBottom: '1px solid var(--border)',
-        position: 'sticky', top: 0, zIndex: 40,
-        background: 'var(--surface-veil)',
-        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--logo-shadow)' }}>
-            <Key size={16} color="var(--accent-ink)" strokeWidth={2.8} />
+    <main className="min-h-dvh bg-(--bg) font-normal text-(--text-primary)">
+      <header className="border-b border-(--border)">
+        <nav aria-label="Main navigation" className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 sm:px-8">
+          <Link href="/" aria-label="Cipheria home" className="flex items-center gap-2.5 no-underline">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-(--accent)">
+              <Key size={16} color="var(--accent-ink)" strokeWidth={2.5} aria-hidden="true" />
+            </span>
+            <span className="font-display text-2xl">Cipheria</span>
+          </Link>
+          <div className="flex items-center gap-3 sm:gap-6">
+            <Link href="#privacy" className="hidden py-3 text-sm text-(--text-secondary) hover:text-(--text-primary) sm:inline-flex">Privacy</Link>
+            <Link href="/auth" className="btn-ghost no-underline">Sign in</Link>
           </div>
-          <span className="font-display" style={{ fontSize: 'clamp(1.15rem, 3vw, 1.35rem)', color: 'var(--text-primary)', lineHeight: 1 }}>
-            Cipheria
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Link href="/auth" className="nav-link nav-link-ghost">Sign In</Link>
-          <Link href="/auth?tab=register" className="nav-link nav-link-primary">
-            Get Started <ArrowRight size={13} />
-          </Link>
-        </div>
-      </nav>
+        </nav>
+      </header>
 
-      {/* Hero */}
-      <section style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 'clamp(56px, 12vw, 112px) 24px clamp(56px, 10vw, 96px)', position: 'relative' }}>
-        <div style={{ width: 1, height: 48, background: 'linear-gradient(to bottom, transparent, var(--border))', marginBottom: 20 }} />
-
-        <div className="animate-fade-up" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'var(--accent-dim)', border: '1px solid var(--accent-border-strong)', borderRadius: 100, padding: '5px 14px', marginBottom: 'clamp(20px, 5vw, 28px)' }}>
-          <Shield size={11} color="var(--accent)" />
-          <span style={{ fontSize: '0.7rem', color: 'var(--accent)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500 }}>
-            Browser-encrypted vault contents
-          </span>
-        </div>
-
-        <h1 className="font-display animate-fade-up" style={{ fontSize: 'clamp(2.8rem, 12vw, 6.5rem)', lineHeight: 1.05, animationDelay: '80ms', maxWidth: 760, marginBottom: 'clamp(18px, 4vw, 24px)' }}>
-          <span className="text-gradient">Your secrets,</span>
-          <br />
-          <span style={{ color: 'var(--text-primary)', fontStyle: 'italic', opacity: 0.95 }}>encrypted locally.</span>
-        </h1>
-
-        <p className="animate-fade-up" style={{ fontSize: 'clamp(0.9rem, 2.2vw, 1.05rem)', color: 'var(--text-secondary)', maxWidth: 440, lineHeight: 1.8, marginBottom: 'clamp(32px, 8vw, 52px)', animationDelay: '160ms' }}>
-          Cipheria encrypts passwords and item contents in your browser. Item names, categories, favourites and timestamps remain visible to the server.
-        </p>
-
-        <div className="animate-fade-up hero-ctas" style={{ display: 'flex', gap: 10, animationDelay: '240ms' }}>
-          <Link href="/auth?tab=register" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, textDecoration: 'none', background: 'var(--accent)', color: 'var(--accent-ink)', fontWeight: 600, padding: '13px 28px', borderRadius: 'var(--radius-md)', fontSize: '0.95rem', letterSpacing: '0.02em', transition: 'all 0.2s', width: '100%' }}>
-            Start for free <ArrowRight size={16} />
-          </Link>
-          <Link href="/auth" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '13px 28px', borderRadius: 'var(--radius-md)', fontSize: '0.95rem', transition: 'all 0.2s', width: '100%' }}>
-            Sign in
-          </Link>
-        </div>
-
-        <div style={{ width: 1, height: 48, marginTop: 52, background: 'linear-gradient(to bottom, var(--border), transparent)' }} />
-      </section>
-
-      {/* Features */}
-      <section style={{ borderTop: '1px solid var(--border)', padding: 'clamp(52px, 10vw, 88px) clamp(20px, 5vw, 48px)' }}>
-        <div style={{ maxWidth: 1060, margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: 'clamp(36px, 7vw, 60px)' }}>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 12 }}>
-              Why Cipheria
+      <div className="mx-auto max-w-7xl px-5 sm:px-8">
+        <section className="grid gap-8 py-12 sm:py-16 lg:grid-cols-[1.2fr_1fr] lg:items-center lg:gap-x-16 lg:gap-y-10" aria-labelledby="intro-title">
+          <div>
+            <p className="mb-5 font-mono text-xs uppercase tracking-[0.16em] text-(--accent)">Cipheria / Personal vault</p>
+            <h1 id="intro-title" className="font-display text-[clamp(2.75rem,6vw,4.5rem)] leading-[1.05] tracking-tight">
+              Passwords, cards<br /><span className="italic text-(--accent)">and private notes.</span>
+            </h1>
+          </div>
+          <div>
+            <p className="max-w-md text-base leading-relaxed text-(--text-secondary)">
+              Import the passwords you already use. Find and copy saved details, or keep an encrypted export. Your master password unlocks it all.
             </p>
-            <h2 className="font-display" style={{ fontSize: 'clamp(1.7rem, 5vw, 2.6rem)', color: 'var(--text-primary)', lineHeight: 1.1 }}>
-              Inside your <span className="text-gradient">Cipheria vault</span>
-            </h2>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link href="/auth?tab=register" className="btn-primary no-underline">
+                Create your vault <ArrowRight size={16} aria-hidden="true" />
+              </Link>
+              <Link href="#moving-in" className="btn-ghost no-underline">How it works</Link>
+            </div>
           </div>
-
-          <div className="features-grid">
+          <figure className="overflow-hidden rounded-xl border border-(--border) bg-(--bg-card) lg:col-span-2">
+            <figcaption className="flex flex-wrap items-center justify-between gap-2 border-b border-(--border) px-5 py-4">
+              <span className="font-display text-xl">The Cipheria vault</span>
+              <span className="text-sm text-(--text-secondary)">Actual interface, fictitious data</span>
+            </figcaption>
             {[
-              { icon: Shield, title: 'Encrypted Vault Contents', desc: 'Passwords, notes and other item contents are encrypted locally. Item names and organisational metadata are stored separately.' },
-              { icon: Lock, title: 'Single Master Password', desc: 'One master password unlocks your vault and derives your encryption key locally on your device.' },
-              { icon: EyeOff, title: 'Breach Check', desc: 'Check saved passwords against Have I Been Pwned without ever sending the full password to the service.' },
-              { icon: RefreshCw, title: 'Session Controls', desc: 'Sign out other browsers from Settings. Changing your master password also signs out your other sessions.' },
-              { icon: TimerReset, title: 'Idle Auto-Lock', desc: 'After five minutes without activity, your vault locks. Enter your master password to open it again.' },
-              { icon: Download, title: 'Encrypted Export', desc: 'Download JSON containing encrypted item contents and readable metadata. Keep the master password used for that export.' },
-            ].map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="glass glass-hover" style={{ borderRadius: 'var(--radius-lg)', padding: 'clamp(18px, 3vw, 26px)' }}>
-                <div className="feature-card-inner" style={{ display: 'flex', flexDirection: 'row', gap: 14, alignItems: 'flex-start' }}>
-                  <div className="feature-icon" style={{ width: 40, height: 40, borderRadius: 10, flexShrink: 0, background: 'var(--accent-dim)', border: '1px solid var(--accent-border-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
-                    <Icon size={18} color="var(--accent)" strokeWidth={1.8} />
-                  </div>
-                  <div>
-                    <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>{title}</h3>
-                    <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>{desc}</p>
-                  </div>
-                </div>
-              </div>
+              { theme: 'dark', classes: 'block [[data-resolved-theme=light]_&]:hidden' },
+              { theme: 'light', classes: 'hidden [[data-resolved-theme=light]_&]:block' },
+            ].map(({ theme, classes }) => (
+              <picture key={theme} className={classes}>
+                <source media="(max-width: 639px)" srcSet={`/vault-preview-${theme}-mobile.webp`} width={390} height={560} />
+                <Image src={`/vault-preview-${theme}.webp`} width={1280} height={800} unoptimized
+                  alt="Cipheria's vault showing saved items and a selected login with password visibility and copy controls."
+                  className="h-auto w-full" />
+              </picture>
             ))}
-          </div>
-        </div>
-      </section>
+          </figure>
+        </section>
 
-      {/* Footer */}
-      <footer style={{ borderTop: '1px solid var(--border)', padding: 'clamp(16px, 3vw, 22px) 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <div style={{ width: 18, height: 18, borderRadius: 5, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Key size={9} color="var(--accent-ink)" strokeWidth={3} />
+        <section id="moving-in" aria-labelledby="moving-in-title" className="grid scroll-mt-6 gap-8 border-t border-(--border) py-12 sm:py-16 lg:grid-cols-2 lg:gap-20">
+          <div>
+            <p className="mb-4 font-mono text-xs uppercase tracking-[0.16em] text-(--accent)">Make it yours</p>
+            <h2 id="moving-in-title" className="font-display text-4xl leading-tight sm:text-5xl">Start with what<br />you already have.</h2>
           </div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Cipheria</span>
+          <ol className="divide-y divide-(--border)">
+            {[
+              { title: 'Import browser passwords', text: 'Import a browser CSV, map its columns and review duplicates before saving. Existing entries stay untouched.' },
+              { title: 'Find and copy credentials', text: 'Save logins, cards, notes and identities. Search names, login usernames and website URLs; copy details when you need them.' },
+              { title: 'Export and restore your vault', text: 'Export an encrypted Cipheria JSON file and restore it with the password you used at export time.' },
+            ].map(({ title, text }, index) => (
+              <li key={title} className="flex gap-5 py-5 first:pt-0 last:pb-0">
+                <span className="pt-1 font-mono text-xs text-(--accent)" aria-hidden="true">0{index + 1}</span>
+                <div>
+                  <h3 className="font-display text-2xl">{title}</h3>
+                  <p className="mt-2 text-base leading-relaxed text-(--text-secondary)">{text}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section id="privacy" aria-labelledby="privacy-title" className="grid scroll-mt-6 gap-8 border-t border-(--border) py-12 sm:py-16 lg:grid-cols-2 lg:gap-20">
+          <div>
+            <p className="mb-4 font-mono text-xs uppercase tracking-[0.16em] text-(--accent)">The encryption boundary</p>
+            <h2 id="privacy-title" className="font-display text-4xl leading-tight sm:text-5xl">Know what<br />stays private.</h2>
+          </div>
+          <div>
+            <dl className="space-y-5">
+              <div>
+                <dt className="text-sm font-medium">Encrypted in your browser</dt>
+                <dd className="mt-2 text-base leading-relaxed text-(--text-secondary)">Passwords, URLs, notes, card details and other item contents are encrypted before being sent to the server.</dd>
+              </div>
+              <div>
+                <dt className="text-sm font-medium">Visible to the server</dt>
+                <dd className="mt-2 text-base leading-relaxed text-(--text-secondary)">Item names, categories, favourites and timestamps, along with your account details. JSON exports also retain readable listing metadata.</dd>
+              </div>
+            </dl>
+            <p className="mt-6 border-l-2 border-(--accent) pl-4 text-base leading-relaxed text-(--text-secondary)">
+              Your master password is not sent to the server. If you forget it, Cipheria cannot decrypt your vault for you.
+            </p>
+          </div>
+        </section>
+      </div>
+
+      <footer className="border-t border-(--border)">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-6 text-sm text-(--text-secondary) sm:px-8">
+          <span className="font-display text-xl text-(--text-primary)">Cipheria</span>
+          <p>No ads. Analytics and performance measurement on this public page only.</p>
+          <Link href="/auth?tab=register" className="inline-flex min-h-11 items-center gap-2 text-(--accent) hover:underline">
+            Create your vault <ArrowRight size={14} aria-hidden="true" />
+          </Link>
         </div>
-        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>·</span>
-        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>© {new Intl.DateTimeFormat('en-US', { year: 'numeric' }).format(new Date())} · Open source · No ads · Public-page analytics only; auth and vault pages excluded</span>
       </footer>
       <Analytics beforeSend={publicPageEvent} />
       <SpeedInsights beforeSend={publicPageEvent} />
