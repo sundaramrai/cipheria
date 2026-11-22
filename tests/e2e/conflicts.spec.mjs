@@ -26,6 +26,7 @@ test('two tabs preserve edits, reject stale key rotation, and rewrap passwords',
   test.setTimeout(120_000);
   await page.goto('/auth');
   await page.getByRole('button', { name: 'Create Account', exact: true }).click();
+  await page.locator('#confirmMasterPassword').waitFor();
   await page.locator('#email').fill(`conflicts-${crypto.randomUUID()}@example.com`);
   await page.locator('#masterPassword').fill(master);
   await page.locator('#confirmMasterPassword').fill(master);
@@ -85,10 +86,10 @@ test('two tabs preserve edits, reject stale key rotation, and rewrap passwords',
     await route.continue();
   }, { times: 1 });
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.locator('#settings-current-master-password').fill(master);
+  await page.getByRole('tab', { name: 'Security', exact: true }).click();
+  await page.getByRole('button', { name: /^Advanced vault protection/ }).click();
+  await page.locator('#settings-protection-password').fill(master);
   const nextPassword = 'Replacement-conflict-test-password-723!';
-  await page.locator('#settings-new-master-password').fill(nextPassword);
-  await page.locator('#settings-confirm-master-password').fill(nextPassword);
   const failedChange = page.waitForResponse('**/api/auth/master-password');
   await page.getByRole('button', { name: 'Rotate vault key', exact: true }).click();
   await prepared.promise;
@@ -97,10 +98,15 @@ test('two tabs preserve edits, reject stale key rotation, and rewrap passwords',
     await save(other);
   } finally { release.resolve(); }
   expect((await failedChange).status()).toBe(412);
-  await expect(page.locator('#settings-new-master-password')).toHaveValue(nextPassword);
-  await expect(page.getByRole('button', { name: 'Change Master Password', exact: true })).toBeEnabled();
+  await expect(page.locator('#settings-protection-password')).toHaveValue(master);
+  await expect(page.getByRole('alert')).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('button', { name: /^Change master password/ }).click();
+  await page.locator('#settings-current-master-password').fill(master);
+  await page.locator('#settings-new-master-password').fill(nextPassword);
+  await page.locator('#settings-confirm-master-password').fill(nextPassword);
   const changed = page.waitForResponse('**/api/auth/master-password');
-  await page.getByRole('button', { name: 'Change Master Password', exact: true }).click();
+  await page.getByRole('button', { name: 'Change master password', exact: true }).click();
   const changedResponse = await changed;
   expect(changedResponse.status()).toBe(200);
   const updatedUser = await changedResponse.json();
