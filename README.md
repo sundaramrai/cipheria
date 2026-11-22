@@ -49,7 +49,7 @@ To run the API and frontend in Docker instead, use `docker compose -f docker-com
 
 Unlock the vault and choose **Import** beside **Export**. CSV imports support column mapping for title, URL, username, password and notes. JSON restores accept Cipheria 1.0/2.0 exports and require the export-time master password.
 
-Files must contain 1?1,000 records/items and fit within 2 MiB. Imports preview duplicates, create new items and never overwrite existing ones. Passkeys and authenticator secrets do not transfer. Delete plaintext browser CSVs after importing. [Import details](docs/architecture.md#import-and-export).
+Files must contain 1-1,000 records/items and fit within 2 MiB. Imports preview duplicates, create new items and never overwrite existing ones. Passkeys and authenticator secrets do not transfer. Delete plaintext browser CSVs after importing. [Import details](docs/architecture.md#import-and-export).
 
 ## Configuration and deployment
 
@@ -88,4 +88,4 @@ uv run python -m unittest discover -s tests -v
 
 PostgreSQL integration and browser checks require a disposable database; see [test setup](docs/architecture.md#test-setup). CI configuration is in [checks.yml](.github/workflows/checks.yml).
 
-[Architecture](docs/architecture.md) ? [Key formats](docs/key-management.md) ? [Roadmap](docs/technical-roadmap.md) ? [GPL-3.0](LICENSE)
+[Architecture](docs/architecture.md) | [Key formats](docs/key-management.md) | [Roadmap](docs/technical-roadmap.md) | [GPL-3.0](LICENSE)
