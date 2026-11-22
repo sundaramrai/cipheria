@@ -17,4 +17,4 @@ Serve the frontend and `/api` on one HTTPS origin. Set `ENVIRONMENT=production` 
 
 Icons are local. Explicit breach checks send only a five-character SHA-1 prefix to HIBP. Analytics/performance events are restricted to the public landing page. SMTP receives verification messages; absent SMTP does not log bodies/tokens. Do not enable SQL parameter logs or browser recordings for real vaults; CSV exports contain plaintext passwords.
 
-Automated checks cover request validation, sessions, import transactions, revision/key races and browser flows. [Release verification](technical-roadmap.md#release-checklist) tracks remaining checks; no independent security audit has been completed.
+No independent security audit has been completed.
