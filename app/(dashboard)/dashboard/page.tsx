@@ -24,6 +24,7 @@ import { itemMatchesSearch } from '@/lib/vaultSearch';
 import { LockedVaultScreen } from '../../../components/dashboard/LockedVaultScreen';
 import { MainDashboard } from '../../../components/dashboard/MainDashboard';
 import { SettingsModal } from '@/components/dashboard/SettingsModal';
+import type { MasterPasswordForm } from '@/components/dashboard/SettingsModal';
 import { ImportVaultModal } from '@/components/dashboard/ImportVaultModal';
 
 function toItemFormCategory(category: string): ItemForm['category'] {
@@ -61,9 +62,6 @@ export default function Page() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedItemLoading, setSelectedItemLoading] = useState(false);
   const [hibp, setHibp] = useState<{ checking: boolean; count: number | null }>({ checking: false, count: null });
-  const [profileForm, setProfileForm] = useState({ full_name: '', master_hint: '' });
-  const [masterPasswordForm, setMasterPasswordForm] = useState({ current_password: '', password: '', confirm: '', master_hint: '' });
-  const [deletePassword, setDeletePassword] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
   const [verificationSending, setVerificationSending] = useState(false);
   const [masterPasswordSaving, setMasterPasswordSaving] = useState(false);
@@ -114,20 +112,10 @@ export default function Page() {
       setEditBase(null);
       setEditConflict(false);
       setShowSettingsModal(false);
-      setMasterPasswordForm(previous => ({ current_password: '', password: '', confirm: '', master_hint: previous.master_hint }));
-      setDeletePassword('');
       decryptingItemIds.current.clear();
       clearSelection();
     }
   }, [clearSelection, isVaultLocked]);
-
-  useEffect(() => {
-    setProfileForm({
-      full_name: user?.full_name ?? '',
-      master_hint: user?.master_hint ?? '',
-    });
-    setMasterPasswordForm((prev) => ({ ...prev, master_hint: user?.master_hint ?? '' }));
-  }, [user]);
 
   const refreshCurrentView = useCallback(async (
     targetPage = page,
@@ -493,23 +481,23 @@ export default function Page() {
     );
   }, []);
 
-  const handleSaveProfile = useCallback(async (e: React.SyntheticEvent) => {
-    e.preventDefault();
+  const handleSaveProfile = useCallback(async (changes: { full_name?: string | null; master_hint?: string | null }) => {
     setProfileSaving(true);
     try {
       const { data } = await authApi.updateProfile({
-        full_name: profileForm.full_name || null,
-        master_hint: profileForm.master_hint || null,
+        full_name: user?.full_name ?? null,
+        master_hint: user?.master_hint ?? null,
+        ...changes,
       });
       setUser(data);
       emitAuthEvent('user-updated', data);
-      toastService.success('Profile updated');
+      return null;
     } catch (err) {
-      toastService.error(getSessionAwareError(err, 'Failed to update profile'));
+      return getSessionAwareError(err, 'Failed to update profile');
     } finally {
       setProfileSaving(false);
     }
-  }, [profileForm, setUser]);
+  }, [setUser, user]);
 
   const handleResendVerification = useCallback(async () => {
     setVerificationSending(true);
@@ -523,20 +511,30 @@ export default function Page() {
     }
   }, []);
 
-  const handleChangeMasterPassword = useCallback(async (e: React.SyntheticEvent, rotate = false) => {
-    e.preventDefault();
-    if (masterPasswordSaving) return;
+  const recoverProtectionChange = useCallback(async (previous: { id: string; vault_salt: string }) => {
+    try {
+      const { data } = await authApi.me();
+      if (data.id !== previous.id || useAuthStore.getState().user?.id !== previous.id || data.vault_salt === previous.vault_salt) return false;
+      setUser(data);
+      emitAuthEvent('user-updated', data);
+      lockVault();
+      setShowSettingsModal(false);
+      toastService.info('Vault protection changed. Unlock with its current master password.');
+      return true;
+    } catch { /* The session interceptor handles confirmed revocation. */ }
+    return false;
+  }, [lockVault, setUser]);
+
+  const handleChangeMasterPassword = useCallback(async (masterPasswordForm: MasterPasswordForm, rotate = false) => {
+    if (masterPasswordSaving) return 'A vault protection update is already in progress';
     if (!cryptoKey || !user) {
-      toastService.error('Unlock the vault before changing the master password');
-      return;
+      return 'Unlock the vault before changing the master password';
     }
     if (!masterPasswordForm.current_password) {
-      toastService.error('Enter your current master password');
-      return;
+      return 'Enter your current master password';
     }
     if (!rotate && (!masterPasswordForm.password || masterPasswordForm.password !== masterPasswordForm.confirm)) {
-      toastService.error('Master password confirmation does not match');
-      return;
+      return 'Master password confirmation does not match';
     }
 
     setMasterPasswordSaving(true);
@@ -545,20 +543,20 @@ export default function Page() {
       // Verify the current password before preparing a potentially expensive migration.
       await authApi.unlock(currentVerifier);
       const password = rotate ? masterPasswordForm.current_password : masterPasswordForm.password;
-      let keyEnvelope;
-      let items: Array<{ id: string; revision: number; encrypted_data: string }> = [];
-      if (user.key_envelope && !rotate) {
-        keyEnvelope = await rewrapVaultKey(masterPasswordForm.current_password, password, user.key_envelope);
-      } else {
+      const prepareKeyChange = async () => {
+        if (user.key_envelope && !rotate) {
+          return { keyEnvelope: await rewrapVaultKey(masterPasswordForm.current_password, password, user.key_envelope), items: [] };
+        }
         const created = await createVaultKey(password, user.key_envelope?.vault_id);
-        keyEnvelope = created.envelope;
         const { data } = await vaultApi.export(true);
         if (data.vault_salt !== user.vault_salt) throw new Error('Vault password changed. Unlock again before changing it.');
-        items = await Promise.all((data.items as Array<{ id: string; revision: number; encrypted_data: string }>).map(async item => {
+        const items = await Promise.all((data.items as Array<{ id: string; revision: number; encrypted_data: string }>).map(async item => {
           const payload = await decryptData(item.encrypted_data, cryptoKey, item.id);
           return { id: item.id, revision: item.revision, encrypted_data: await encryptData(payload, created.key, item.id) };
         }));
-      }
+        return { keyEnvelope: created.envelope, items };
+      };
+      const { keyEnvelope, items } = await prepareKeyChange();
       if (!liveVault()) throw new Error('Vault locked during key preparation');
       const newSalt = keyEnvelope.salt;
       const nextVerifier = await deriveMasterPasswordVerifier(password, newSalt, 2);
@@ -567,47 +565,33 @@ export default function Page() {
         current_master_password_verifier: currentVerifier,
         new_vault_salt: newSalt,
         new_master_password_verifier: nextVerifier,
-        master_hint: masterPasswordForm.master_hint || null,
+        master_hint: user.master_hint || null,
         items,
         key_envelope: keyEnvelope,
       });
-      if (useAuthStore.getState().user?.id !== user.id) return;
+      if (useAuthStore.getState().user?.id !== user.id) return null;
       setUser(updatedUser);
       emitAuthEvent('user-updated', updatedUser);
-      setMasterPasswordForm({ current_password: '', password: '', confirm: '', master_hint: updatedUser.master_hint ?? '' });
       lockVault();
       emitAuthEvent('lock');
       setShowSettingsModal(false);
       toastService.success(rotate ? 'Vault encryption updated. Unlock with your master password.' : 'Master password changed. Unlock with the new password.');
+      return null;
     } catch (err) {
-      // A transaction may have committed even when its response was lost.
-      // Refresh the wrapper/salt before allowing another key operation.
-      try {
-        const { data } = await authApi.me();
-        if (data.id === user.id && useAuthStore.getState().user?.id === user.id && data.vault_salt !== user.vault_salt) {
-          setUser(data);
-          emitAuthEvent('user-updated', data);
-          lockVault();
-          setShowSettingsModal(false);
-          toastService.info('Vault protection changed. Unlock with its current master password.');
-          return;
-        }
-      } catch { /* The session interceptor handles confirmed revocation. */ }
-      toastService.error(getSessionAwareError(err, 'Failed to change master password'));
+      // Recover committed changes whose successful response was lost.
+      if (await recoverProtectionChange(user)) return null;
+      return getSessionAwareError(err, 'Failed to change master password');
     } finally {
       setMasterPasswordSaving(false);
     }
-  }, [cryptoKey, liveVault, lockVault, masterPasswordForm, masterPasswordSaving, setUser, user]);
+  }, [cryptoKey, liveVault, lockVault, masterPasswordSaving, recoverProtectionChange, setUser, user]);
 
-  const handleDeleteAccount = useCallback(async (e: React.SyntheticEvent) => {
-    e.preventDefault();
+  const handleDeleteAccount = useCallback(async (deletePassword: string) => {
     if (!deletePassword) {
-      toastService.error('Enter your master password to delete the account');
-      return;
+      return 'Enter your master password to delete the account';
     }
     if (!user?.vault_salt) {
-      toastService.error('Session error - please sign out and sign in again');
-      return;
+      return 'Session error - please sign out and sign in again';
     }
     setDeletingAccount(true);
     try {
@@ -616,12 +600,13 @@ export default function Page() {
       emitAuthEvent('logout');
       logout();
       router.replace('/auth');
+      return null;
     } catch (err) {
-      toastService.error(getSessionAwareError(err, 'Failed to delete account'));
+      return getSessionAwareError(err, 'Failed to delete account');
     } finally {
       setDeletingAccount(false);
     }
-  }, [deletePassword, logout, router, user]);
+  }, [logout, router, user]);
 
   const handleRestoreItem = useCallback(async (id: string) => {
     await toastService.withProgress(
@@ -802,12 +787,6 @@ export default function Page() {
       {showSettingsModal && (
         <SettingsModal
           user={user}
-          profileForm={profileForm}
-          setProfileForm={setProfileForm}
-          masterPasswordForm={masterPasswordForm}
-          setMasterPasswordForm={setMasterPasswordForm}
-          deletePassword={deletePassword}
-          setDeletePassword={setDeletePassword}
           profileSaving={profileSaving}
           verificationSending={verificationSending}
           masterPasswordSaving={masterPasswordSaving}
@@ -816,7 +795,6 @@ export default function Page() {
           onSaveProfile={handleSaveProfile}
           onResendVerification={handleResendVerification}
           onChangeMasterPassword={handleChangeMasterPassword}
-          onRotateKey={(event) => handleChangeMasterPassword(event, true)}
           onDeleteAccount={handleDeleteAccount}
         />
       )}
