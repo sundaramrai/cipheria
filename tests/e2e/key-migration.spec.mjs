@@ -33,7 +33,9 @@ test('a legacy vault upgrades without losing Trash or old-backup compatibility',
   await page.locator('button[type=submit]').click();
   await page.waitForURL('**/dashboard');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.locator('#settings-current-master-password').fill(password);
+  await page.getByRole('tab', { name: 'Security', exact: true }).click();
+  await page.getByRole('button', { name: /^Advanced vault protection/ }).click();
+  await page.locator('#settings-protection-password').fill(password);
   let migratedProfile;
   await page.route('**/api/auth/master-password', async route => {
     const committed = await route.fetch();
