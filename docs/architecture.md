@@ -50,7 +50,7 @@ Password generation uses Web Crypto randomness with rejection sampling; strength
 
 | Limit | Value |
 | --- | --- |
-| Source file | 2 MiB; 1?1,000 records/items |
+| Source file | 2 MiB; 1-1,000 records/items |
 | Prepared API request | 3 MiB |
 | Destination capacity | 1,000 active items |
 
