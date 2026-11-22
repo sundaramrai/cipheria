@@ -18,7 +18,6 @@
   --grip-bg: rgba(255, 255, 255, 0.12);
   --logo-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
   --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 1px 4px rgba(0, 0, 0, 0.45);
-  --button-sheen: linear-gradient(to bottom, rgba(255, 255, 255, 0.1) 0%, transparent 60%);
   --accent-border-soft: rgba(245, 158, 11, 0.18);
   --accent-border-strong: rgba(245, 158, 11, 0.28);
   --accent-border-focus: rgba(245, 158, 11, 0.4);
@@ -41,9 +40,6 @@
   --danger-border-strong: rgba(239, 68, 68, 0.42);
   --danger-hover-text: #f87171;
   --status-ink: #060504;
-  --text-gradient-start: #f5f0e8;
-  --text-gradient-mid: #f59e0b;
-  --text-gradient-end: #d97706;
   --text-muted: #8a8270;
 
   /* Borders */
@@ -98,7 +94,6 @@
   --grip-bg: rgba(36, 22, 10, 0.14);
   --logo-shadow: 0 2px 8px rgba(217, 119, 6, 0.22);
   --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42), 0 1px 4px rgba(56, 36, 18, 0.1);
-  --button-sheen: linear-gradient(to bottom, rgba(255, 255, 255, 0.46) 0%, transparent 60%);
   --accent-border-soft: rgba(217, 119, 6, 0.18);
   --accent-border-strong: rgba(217, 119, 6, 0.28);
   --accent-border-focus: rgba(217, 119, 6, 0.36);
@@ -121,9 +116,6 @@
   --danger-border-strong: rgba(220, 38, 38, 0.38);
   --danger-hover-text: #b91c1c;
   --status-ink: #fffaf0;
-  --text-gradient-start: #24160a;
-  --text-gradient-mid: #d97706;
-  --text-gradient-end: #b45309;
   --text-muted: #6b5b4b;
 
   --border: rgba(161, 98, 7, 0.16);
@@ -137,7 +129,6 @@
   --accent: #d97706;
   --accent-dim: rgba(217, 119, 6, 0.1);
   --accent-glow: rgba(217, 119, 6, 0.16);
-  --accent-ink: #fffaf0;
 
   --danger: #dc2626;
   --danger-dim: rgba(220, 38, 38, 0.12);
@@ -162,6 +153,11 @@ body {
   -moz-osx-font-smoothing: grayscale;
   min-height: 100dvh;
   overflow-x: hidden;
+}
+
+:root[data-resolved-theme='light'] body,
+:root[data-resolved-theme='light'] .input-field {
+  font-weight: 400;
 }
 
 /* Subtle diagonal rule overlay depth without noise */
@@ -222,14 +218,6 @@ h4 {
   box-shadow: var(--glass-shadow);
 }
 
-/* Text gradient */
-.text-gradient {
-  background: linear-gradient(140deg, var(--text-gradient-start) 0%, var(--text-gradient-mid) 55%, var(--text-gradient-end) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
 /* Inputs */
 .input-field {
   width: 100%;
@@ -288,15 +276,6 @@ h4 {
   user-select: none;
   -webkit-user-select: none;
   transition: background 0.18s, transform 0.14s var(--ease-vault), box-shadow 0.18s;
-}
-
-/* Inner highlight shimmer */
-.btn-primary::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--button-sheen);
-  pointer-events: none;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -397,7 +376,7 @@ h4 {
   background: transparent;
   cursor: pointer;
   color: var(--text-tertiary);
-  transition: color 0.15s, background 0.15s, border-color 0.15s, transform 0.1s;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
   flex-shrink: 0;
   padding: 0;
 }
@@ -406,10 +385,6 @@ h4 {
   color: var(--text-primary);
   background: var(--bg-overlay);
   border-color: var(--border);
-}
-
-.btn-icon:active {
-  transform: scale(0.92);
 }
 
 .btn-primary:focus-visible,
@@ -546,4 +521,31 @@ h4 {
   html {
     scroll-behavior: auto;
   }
+}
+
+/* Settings selection and keyboard focus. */
+.settings-content .input-field:focus,
+.settings-content button:focus-visible,
+.settings-theme-option input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.settings-content button:disabled {
+  cursor: default;
+}
+
+.settings-tabs button[aria-selected='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.settings-theme-option input:checked + span {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.settings-actions > button {
+  flex: 1 1 130px;
 }
