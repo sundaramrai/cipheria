@@ -12,7 +12,7 @@ test('production CSP authorizes the nonce without inline scripts or eval', () =>
   assert.ok(!directives.get('script-src').includes("'unsafe-inline'"));
   assert.ok(!directives.get('script-src').includes("'unsafe-eval'"));
   assert.deepEqual(directives.get('frame-ancestors'), ["'none'"]);
-  assert.ok(directives.get('connect-src').includes('https://api.pwnedpasswords.com'));
+  assert.deepEqual(directives.get('connect-src'), ["'self'", 'https://api.pwnedpasswords.com']);
   assert.ok(directives.has('upgrade-insecure-requests'));
 });
 
