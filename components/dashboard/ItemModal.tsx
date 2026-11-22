@@ -163,7 +163,7 @@ export function Modal({ children, onClose, title, icon, closeDisabled = false }:
               {title}
             </h3>
           </div>
-          <button type="button" onClick={onClose} className="btn-icon" aria-label="Close dialog" disabled={closeDisabled} style={{ borderRadius: 8 }}>
+          <button type="button" onClick={onClose} className="btn-icon" aria-label="Close dialog" disabled={closeDisabled} style={{ borderRadius: 8, width: 44, height: 44 }}>
             <X size={14} />
           </button>
         </div>
